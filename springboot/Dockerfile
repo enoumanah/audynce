@@ -1,6 +1,6 @@
 # --- Stage 1: The Builder ---
 # This stage uses a full JDK and Maven to build the application JAR file.
-FROM maven:3.9.6-eclipse-temurin-17 AS builder
+FROM maven:3.9.6-eclipse-temurin-21 AS builder
 
 # Set the working directory inside the container
 WORKDIR /app
@@ -21,7 +21,7 @@ RUN mvn package -B -DskipTests
 # --- Stage 2: The Final Image ---
 # This stage uses a minimal Java Runtime Environment (JRE) for the final image.
 # It results in a smaller, more secure container.
-FROM eclipse-temurin:17-jre-jammy
+FROM eclipse-temurin:21-jre-jammy
 
 WORKDIR /app
 
