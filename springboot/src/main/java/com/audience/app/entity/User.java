@@ -1,5 +1,6 @@
 package com.audience.app.entity;
 
+import com.audience.app.converter.TokenEncryptor;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
@@ -35,10 +36,12 @@ public class User {
 
     @JsonIgnore
     @Column(name = "access_token", nullable = false, length = 512)
+    @Convert(converter = TokenEncryptor.class)
     private String accessToken;
 
     @JsonIgnore
     @Column(name = "refresh_token", nullable = false, length = 512)
+    @Convert(converter = TokenEncryptor.class)
     private String refreshToken;
 
     @Column(name = "token_expires_at")
@@ -57,14 +60,10 @@ public class User {
     private LocalDateTime createdAt;
 
     @UpdateTimestamp
-    @Column(name = "update_at", nullable = false)
+    @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-    @Column(name = "login_at")
-    private LocalDateTime loginAt;
-
-    public enum SubscriptionTier{
-        FREE, PREMIUM, ENTERPRISE
-    }
+    @Column(name = "last_login_at")
+    private LocalDateTime lastLoginAt;
 
 }

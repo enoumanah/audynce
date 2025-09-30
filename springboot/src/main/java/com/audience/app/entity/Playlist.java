@@ -16,7 +16,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-@ToString(exclude = {"users", "tracks"})
+@ToString(exclude = {"user", "tracks"})
 @EqualsAndHashCode(of = "id")
 public class Playlist {
 
@@ -33,9 +33,8 @@ public class Playlist {
     @Column(name = "original_narrative", columnDefinition = "TEXT", nullable = false)
     private String originalNarrative;
 
-    @Column(nullable = false)
-    @Enumerated(EnumType.STRING)
-    private MoodType mood;
+    @Column(name = "ai_analysis_id")
+    private String aiAnalysisId;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
@@ -43,7 +42,7 @@ public class Playlist {
 
     @OneToMany(mappedBy = "playlist", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @Builder.Default
-    private List<Track> tracks = new ArrayList<>();
+    private List<Scene> scenes = new ArrayList<>();
 
     @Column(name = "spotify_playlist_id")
     private String spotifyPlaylistId;
@@ -62,11 +61,5 @@ public class Playlist {
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
-
-    public enum MoodType {
-        UPBEAT, MELANCHOLIC, ROMANTIC, ADVENTUROUS,
-        PEACEFUL, ENERGETIC, NOSTALGIC, DREAMY,
-        INTENSE, CHILL, BALANCED
-    }
 
 }
