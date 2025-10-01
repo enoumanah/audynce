@@ -86,15 +86,15 @@ springdoc:
 # ===============================================================
 # PRODUCTION PROFILE
 # ===============================================================
+# In your PRODUCTION PROFILE
 spring:
   config:
     activate:
       on-profile: production
 
   datasource:
+    # The username and password are part of the DATABASE_URL
     url: ${DATABASE_URL} # Must be provided by Render
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
 
   jpa:
