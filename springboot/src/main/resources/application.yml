@@ -86,16 +86,28 @@ springdoc:
 # ===============================================================
 # PRODUCTION PROFILE
 # ===============================================================
-
-# In your PRODUCTION PROFILE
 spring:
   config:
     activate:
       on-profile: production
 
   datasource:
-    # Datasource properties will now be read directly from environment variables
+    url: ${SPRING_DATASOURCE_URL}
     driver-class-name: org.postgresql.Driver
+
+  jpa:
+    show-sql: false
+    hibernate:
+      ddl-auto: update # Safe for prod: applies changes without dropping data
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+        jdbc.lob.non_contextual_creation: true # Helps with Postgres Lob handling
+
+  h2:
+    console:
+      enabled: false
 
 server:
   error:
