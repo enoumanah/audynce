@@ -48,7 +48,4 @@ public class Track {
     @JoinColumn(name = "scene_id", nullable = false)
     private Scene scene;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    private Playlist playlist;
-
 }
