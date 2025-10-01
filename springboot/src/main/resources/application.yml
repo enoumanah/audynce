@@ -92,12 +92,16 @@ spring:
     activate:
       on-profile: production
 
-  datasource:
-    url: ${DB_URL}
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
-    driver-class-name: org.postgresql.Driver
-    
+  # In your PRODUCTION PROFILE
+  spring:
+    config:
+      activate:
+        on-profile: production
+
+    datasource:
+      # Datasource properties will now be read directly from environment variables
+      driver-class-name: org.postgresql.Driver
+
   jpa:
     hibernate:
       ddl-auto: validate # Use Flyway/Liquibase for schema changes
