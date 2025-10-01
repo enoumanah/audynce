@@ -86,28 +86,16 @@ springdoc:
 # ===============================================================
 # PRODUCTION PROFILE
 # ===============================================================
+
 # In your PRODUCTION PROFILE
 spring:
   config:
     activate:
       on-profile: production
 
-  # In your PRODUCTION PROFILE
-  spring:
-    config:
-      activate:
-        on-profile: production
-
-    datasource:
-      # Datasource properties will now be read directly from environment variables
-      driver-class-name: org.postgresql.Driver
-
-  jpa:
-    hibernate:
-      ddl-auto: validate # Use Flyway/Liquibase for schema changes
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
+  datasource:
+    # Datasource properties will now be read directly from environment variables
+    driver-class-name: org.postgresql.Driver
 
 server:
   error:
