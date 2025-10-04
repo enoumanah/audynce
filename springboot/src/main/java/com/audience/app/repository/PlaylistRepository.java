@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -20,13 +21,10 @@ public interface PlaylistRepository extends JpaRepository<Playlist, Long> {
 
     List<Playlist> findByIsPublicTrue();
 
-    @Query(value = "SELECT p.* FROM playlist p " +
-            "JOIN user u ON p.user_id = u.id " +
-            "WHERE u.spotify_id = :spotifyId " +
-            "AND p.created_at >= CURRENT_TIMESTAMP - INTERVAL '30' DAY " +
-            "ORDER BY p.created_at DESC",
-            nativeQuery = true)
-    List<Playlist> findRecentPlaylistsByUser(@Param("spotifyId") String spotifyId);
+    List<Playlist> findByUserSpotifyIdAndCreatedAtAfterOrderByCreatedAtDesc(
+            String spotifyId,
+            LocalDateTime since
+    );
 
     long countByUserSpotifyId(String spotifyId);
 
