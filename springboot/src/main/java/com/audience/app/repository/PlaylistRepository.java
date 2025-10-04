@@ -20,7 +20,12 @@ public interface PlaylistRepository extends JpaRepository<Playlist, Long> {
 
     List<Playlist> findByIsPublicTrue();
 
-    @Query("SELECT p FROM Playlist p WHERE p.user.spotifyId = :spotifyId AND p.createdAt >= CURRENT_TIMESTAMP - INTERVAL '30' DAY ORDER BY p.createdAt DESC")
+    @Query(value = "SELECT p.* FROM playlist p " +
+            "JOIN user u ON p.user_id = u.id " +
+            "WHERE u.spotify_id = :spotifyId " +
+            "AND p.created_at >= CURRENT_TIMESTAMP - INTERVAL '30' DAY " +
+            "ORDER BY p.created_at DESC",
+            nativeQuery = true)
     List<Playlist> findRecentPlaylistsByUser(@Param("spotifyId") String spotifyId);
 
     long countByUserSpotifyId(String spotifyId);
