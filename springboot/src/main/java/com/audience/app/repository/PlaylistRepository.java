@@ -25,4 +25,6 @@ public interface PlaylistRepository extends JpaRepository<Playlist, Long> {
 
     long countByUserSpotifyId(String spotifyId);
 
+    @Query("SELECT p FROM Playlist p LEFT JOIN FETCH p.scenes WHERE p.id = :id")
+    Optional<Playlist> findByIdWithScenes(@Param("id") Long id);
 }

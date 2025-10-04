@@ -1,6 +1,5 @@
 package com.audience.app.dto.response;
 
-import com.audience.app.entity.MoodType;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -21,7 +20,4 @@ public class TrackResponse {
     private String spotifyUrl;
     private Integer durationMs;
     private Integer position;
-    private Integer sceneNumber;
-    private MoodType mood;
-    private String sceneDescription;
 }
