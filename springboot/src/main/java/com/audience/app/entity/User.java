@@ -66,4 +66,10 @@ public class User {
     @Column(name = "last_login_at")
     private LocalDateTime lastLoginAt;
 
+    @Column(name = "top_artists_cache", columnDefinition = "TEXT")
+    private String topArtistsCache; // JSON cache of user's top artists
+
+    @Column(name = "top_artists_updated_at")
+    private LocalDateTime topArtistsCacheUpdatedAt;
+
 }

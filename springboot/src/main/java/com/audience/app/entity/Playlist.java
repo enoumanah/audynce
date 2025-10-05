@@ -62,4 +62,9 @@ public class Playlist {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    @ElementCollection
+    @CollectionTable(name = "playlist_genres", joinColumns = @JoinColumn(name = "playlist_id"))
+    @Column(name = "genre")
+    private List<String> selectedGenres;
+
 }

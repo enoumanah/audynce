@@ -35,7 +35,7 @@ spring:
           spotify:
             client-id: ${SPOTIFY_CLIENT_ID}
             client-secret: ${SPOTIFY_CLIENT_SECRET}
-            scope: user-read-email, user-read-private, playlist-modify-public, playlist-modify-private
+            scope: user-read-email, user-read-private, user-top-read, playlist-modify-public, playlist-modify-private
             authorization-grant-type: authorization_code
             redirect-uri: ${FRONTEND_URL:http://localhost:3000}/auth/callback
         provider:
@@ -46,14 +46,49 @@ spring:
 
 # Custom Application Properties
 app:
-  # IMPORTANT: This default JWT secret is for local development ONLY.
-  # It MUST be overridden by a secure environment variable in production.
+  fastapi:
+    url: ${FASTAPI_URL:http://localhost:8000}
+    timeout: 30000
+
   jwt:
     secret: ${JWT_SECRET:dummy-local-jwt-secret-for-dev-use-only-12345}
     expiration: 86400000 # 24 hours
 
   frontend:
     url: ${FRONTEND_URL:http://localhost:3000}
+
+  spotify:
+    api-url: https://api.spotify.com/v1
+    accounts-url: https://accounts.spotify.com/api
+    client-id: ${SPOTIFY_CLIENT_ID}
+    client-secret: ${SPOTIFY_CLIENT_SECRET}
+    top-artists-cache-hours: 24 # Cache user's top artists for 24 hours
+
+  ai:
+    model: meta-llama/Llama-3.1-8B-Instruct
+    huggingface-token: ${HUGGINGFACE_TOKEN}
+    story-mode-threshold: 100 # Word count threshold for story vs direct mode
+    max-scenes: 6 # Maximum scenes per story
+
+  # Available genre options for user selection
+  available-genres:
+    - hip-hop
+    - rnb
+    - pop
+    - afrobeats
+    - dance
+    - indie
+    - rock
+    - electronic
+    - jazz
+    - soul
+
+  # Playlist generation settings
+  playlist:
+    min-tracks-per-scene: 3
+    max-tracks-per-scene: 10
+    default-tracks-per-scene: 5
+    max-total-tracks: 50
 
 # IMPORTANT: This default encryption key is for local development ONLY.
 # It MUST be overridden by a secure 16-character environment variable in production.
@@ -71,9 +106,10 @@ server:
 # Logging
 logging:
   level:
-    com.audiance: DEBUG
+    com.audience: DEBUG
     org.hibernate.SQL: DEBUG
     org.springframework.security: INFO
+    org.springframework.web: DEBUG
 
 # API Documentation
 springdoc:
@@ -81,6 +117,7 @@ springdoc:
     path: /api-docs
   swagger-ui:
     path: /swagger-ui.html
+    operationsSorter: method
 
 ---
 # ===============================================================
@@ -90,6 +127,7 @@ spring:
   config:
     activate:
       on-profile: production
+
   datasource:
     driver-class-name: org.postgresql.Driver
 
@@ -118,6 +156,12 @@ springdoc:
 
 logging:
   level:
-    com.audiance: INFO
+    com.audience: INFO
     org.springframework.security: WARN
     org.hibernate.SQL: WARN
+    org.springframework.web: INFO
+
+# Production overrides
+app:
+  ai:
+    story-mode-threshold: 80 # Slightly lower in prod for better UX
