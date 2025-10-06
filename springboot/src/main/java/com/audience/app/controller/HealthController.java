@@ -21,14 +21,16 @@ public class HealthController {
     private String appName;
 
     @Value("${app.available-genres:[]}")
-    private List<String> availableGenres;
+    private String availableGenresString;
 
     @GetMapping
     public ResponseEntity<Map<String, Object>> healthCheck() {
+        List<String> genres = List.of(availableGenresString.split(","));
         Map<String, Object> health = new HashMap<>();
         health.put("status", "UP");
         health.put("application", appName);
         health.put("timestamp", LocalDateTime.now());
+        health.put("availableGenres", genres);
 
         return ResponseEntity.ok(health);
     }

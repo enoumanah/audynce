@@ -72,17 +72,8 @@ app:
 
   # Available genre options for user selection
   app:
-    available-genres: # YAML list (use hyphens for array)
-      - hip-hop
-      - rnb
-      - pop
-      - afrobeats
-      - dance
-      - indie
-      - rock
-      - electronic
-      - jazz
-      - soul
+    available:
+      genres: hip-hop,rnb,pop,afrobeats,dance,indie,rock,electronic,jazz,soul
 
   # Playlist generation settings
   playlist:
