@@ -71,17 +71,8 @@ app:
     max-scenes: 6 # Maximum scenes per story
 
   # Available genre options for user selection
-  available-genres:
-    - hip-hop
-    - rnb
-    - pop
-    - afrobeats
-    - dance
-    - indie
-    - rock
-    - electronic
-    - jazz
-    - soul
+  app:
+    available-genres: [ "hip-hop", "rnb", "pop", "afrobeats", "dance", "indie", "rock", "electronic", "jazz", "soul" ]
 
   # Playlist generation settings
   playlist:
