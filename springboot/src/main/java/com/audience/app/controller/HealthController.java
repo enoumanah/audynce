@@ -20,7 +20,7 @@ public class HealthController {
     @Value("${spring.application.name}")
     private String appName;
 
-    @Value("${app.available-genres}")
+    @Value("${app.available-genres:[]}")
     private List<String> availableGenres;
 
     @GetMapping
@@ -29,7 +29,6 @@ public class HealthController {
         health.put("status", "UP");
         health.put("application", appName);
         health.put("timestamp", LocalDateTime.now());
-        health.put("availableGenres", availableGenres);
 
         return ResponseEntity.ok(health);
     }
