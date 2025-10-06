@@ -349,7 +349,7 @@ public class PlaylistOrchestrationService {
     /**
      * Map Playlist entity to response DTO
      */
-    private PlaylistResponse mapToPlaylistResponse(Playlist playlist) {
+    public PlaylistResponse mapToPlaylistResponse(Playlist playlist) {
         List<SceneResponse> sceneResponses = playlist.getScenes().stream()
                 .map(this::mapToSceneResponse)
                 .collect(Collectors.toList());
