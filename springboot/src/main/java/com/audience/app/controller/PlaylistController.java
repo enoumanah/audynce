@@ -9,7 +9,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -26,14 +27,16 @@ public class PlaylistController {
     @PostMapping("/generate")
     public ResponseEntity<ApiResponse<PlaylistResponse>> generatePlaylist(
             @Valid @RequestBody PlaylistGenerateRequest request,
-            Authentication authentication) {
+            @AuthenticationPrincipal UserDetails userDetails) {
 
-        String spotifyId = authentication.getName();
+        String spotifyId = userDetails.getUsername();
         log.info("Generating playlist for user: {}", spotifyId);
 
         try {
             PlaylistResponse playlist = playlistService.generatePlaylist(spotifyId, request);
-            return ResponseEntity.ok(ApiResponse.success("Playlist generated successfully", playlist));
+            return ResponseEntity.ok(
+                    ApiResponse.success("Playlist generated successfully", playlist)
+            );
         } catch (Exception e) {
             log.error("Error generating playlist for user: {}", spotifyId, e);
             return ResponseEntity
@@ -45,9 +48,9 @@ public class PlaylistController {
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<PlaylistResponse>> getPlaylist(
             @PathVariable Long id,
-            Authentication authentication) {
+            @AuthenticationPrincipal UserDetails userDetails) {
 
-        String spotifyId = authentication.getName();
+        String spotifyId = userDetails.getUsername();
         log.info("Fetching playlist {} for user: {}", id, spotifyId);
 
         try {
@@ -63,14 +66,16 @@ public class PlaylistController {
 
     @GetMapping
     public ResponseEntity<ApiResponse<List<PlaylistResponse>>> getUserPlaylists(
-            Authentication authentication) {
+            @AuthenticationPrincipal UserDetails userDetails) {
 
-        String spotifyId = authentication.getName();
+        String spotifyId = userDetails.getUsername();
         log.info("Fetching all playlists for user: {}", spotifyId);
 
         try {
             List<PlaylistResponse> playlists = playlistService.getUserPlaylists(spotifyId);
-            return ResponseEntity.ok(ApiResponse.success(playlists));
+            return ResponseEntity.ok(
+                    ApiResponse.success("Retrieved " + playlists.size() + " playlists", playlists)
+            );
         } catch (Exception e) {
             log.error("Error fetching playlists for user: {}", spotifyId, e);
             return ResponseEntity
@@ -81,14 +86,16 @@ public class PlaylistController {
 
     @GetMapping("/recent")
     public ResponseEntity<ApiResponse<List<PlaylistResponse>>> getRecentPlaylists(
-            Authentication authentication) {
+            @AuthenticationPrincipal UserDetails userDetails) {
 
-        String spotifyId = authentication.getName();
+        String spotifyId = userDetails.getUsername();
         log.info("Fetching recent playlists for user: {}", spotifyId);
 
         try {
             List<PlaylistResponse> playlists = playlistService.getRecentPlaylists(spotifyId);
-            return ResponseEntity.ok(ApiResponse.success(playlists));
+            return ResponseEntity.ok(
+                    ApiResponse.success("Retrieved " + playlists.size() + " recent playlists", playlists)
+            );
         } catch (Exception e) {
             log.error("Error fetching recent playlists for user: {}", spotifyId, e);
             return ResponseEntity
@@ -100,14 +107,16 @@ public class PlaylistController {
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> deletePlaylist(
             @PathVariable Long id,
-            Authentication authentication) {
+            @AuthenticationPrincipal UserDetails userDetails) {
 
-        String spotifyId = authentication.getName();
+        String spotifyId = userDetails.getUsername();
         log.info("Deleting playlist {} for user: {}", id, spotifyId);
 
         try {
             playlistService.deletePlaylist(id, spotifyId);
-            return ResponseEntity.ok(ApiResponse.success("Playlist deleted successfully", null));
+            return ResponseEntity.ok(
+                    ApiResponse.success("Playlist deleted successfully", null)
+            );
         } catch (RuntimeException e) {
             log.error("Playlist not found: {}", id, e);
             return ResponseEntity

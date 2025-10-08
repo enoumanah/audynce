@@ -9,7 +9,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -22,8 +23,10 @@ public class UserController {
     private final UserService userService;
 
     @GetMapping("/me")
-    public ResponseEntity<ApiResponse<UserResponse>> getCurrentUser(Authentication authentication) {
-        String spotifyId = authentication.getName();
+    public ResponseEntity<ApiResponse<UserResponse>> getCurrentUser(
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        String spotifyId = userDetails.getUsername();
         log.info("Fetching profile for user: {}", spotifyId);
 
         try {
@@ -40,14 +43,16 @@ public class UserController {
     @PutMapping("/me")
     public ResponseEntity<ApiResponse<UserResponse>> updateCurrentUser(
             @Valid @RequestBody UserUpdateRequest request,
-            Authentication authentication) {
+            @AuthenticationPrincipal UserDetails userDetails) {
 
-        String spotifyId = authentication.getName();
+        String spotifyId = userDetails.getUsername();
         log.info("Updating profile for user: {}", spotifyId);
 
         try {
             UserResponse user = userService.updateUser(spotifyId, request);
-            return ResponseEntity.ok(ApiResponse.success("Profile updated successfully", user));
+            return ResponseEntity.ok(
+                    ApiResponse.success("Profile updated successfully", user)
+            );
         } catch (RuntimeException e) {
             log.error("Error updating user: {}", spotifyId, e);
             return ResponseEntity
