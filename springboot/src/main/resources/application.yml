@@ -145,7 +145,7 @@ server:
 
 springdoc:
   swagger-ui:
-    enabled: true
+    enabled: false
 
 logging:
   level:
