@@ -39,17 +39,21 @@ public class SecurityConfig {
                 // Public endpoints
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
+                                "/",
+                                "/error",
+                                "/favicon.ico",
                                 "/api/health",
                                 "/api/auth/**",
                                 "/api-docs/**",
+                                "/v3/api-docs/**",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
+                                "/webjars/**",
                                 "/h2-console/**",
                                 "/oauth2/**",
-                                "/login/**",
-                                "/error"
+                                "/login/**"
                         ).permitAll()
-                        // Secure all other endpoints
+                        // Secure everything else
                         .anyRequest().authenticated()
                 )
                 // OAuth2 Login
@@ -58,17 +62,18 @@ public class SecurityConfig {
                                 authorization.baseUri("/oauth2/authorization")
                         )
                         .redirectionEndpoint(redir ->
-                                // this must match Spotify redirect in your app dashboard
                                 redir.baseUri("/login/oauth2/code/*")
                         )
-                        .userInfoEndpoint(userInfo -> {})
+                        .userInfoEndpoint(userInfo -> {
+                            // no custom mapping needed; Spotify returns 'id', 'display_name', 'email'
+                        })
                         .successHandler(oAuth2SuccessHandler)
                 );
 
-        // Register JWT filter before UsernamePasswordAuthenticationFilter
+        // Add JWT filter
         http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
-        // Allow H2 console frames (local dev only)
+        // Allow H2 console frames (optional)
         http.headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()));
 
         return http.build();
@@ -77,7 +82,6 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-
         configuration.setAllowedOrigins(List.of(
                 "https://audiance.onrender.com",
                 "http://localhost:3000",
