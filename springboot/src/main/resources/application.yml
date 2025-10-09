@@ -35,21 +35,20 @@ spring:
           spotify:
             client-id: ${SPOTIFY_CLIENT_ID}
             client-secret: ${SPOTIFY_CLIENT_SECRET}
+            authorization-grant-type: authorization_code
+            redirect-uri: ${SPOTIFY_REDIRECT_URI:{baseUrl}/login/oauth2/code/{registrationId}}
             scope:
               - user-read-email
               - user-read-private
               - user-top-read
               - playlist-modify-public
               - playlist-modify-private
-            authorization-grant-type: authorization_code
-            redirect-uri: "{baseUrl}/login/oauth2/code/spotify"
-            client-name: Spotify
-        provider:
-          spotify:
-            authorization-uri: https://accounts.spotify.com/authorize
-            token-uri: https://accounts.spotify.com/api/token
-            user-info-uri: https://api.spotify.com/v1/me
-            user-name-attribute: id
+            provider:
+              spotify:
+                authorization-uri: https://accounts.spotify.com/authorize
+                token-uri: https://accounts.spotify.com/api/token
+                user-info-uri: https://api.spotify.com/v1/me
+                user-name-attribute: id
 
 # ===============================================================
 # Custom Application Properties
@@ -159,7 +158,7 @@ springdoc:
 logging:
   level:
     com.audience: INFO
-    org.springframework.security: WARN
+    org.springframework.security: DEBUG
     org.hibernate.SQL: WARN
     org.springframework.web: INFO
   pattern:
