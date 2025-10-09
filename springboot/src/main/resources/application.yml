@@ -16,7 +16,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: create-drop # Resets DB on each start (local only)
     show-sql: true
     properties:
       hibernate:
@@ -44,8 +44,7 @@ spring:
             redirect-uri: "{baseUrl}/login/oauth2/code/spotify"
             authorization-grant-type: authorization_code
             provider: spotify
-
-        provider: 
+        provider:
           spotify:
             authorization-uri: https://accounts.spotify.com/authorize
             token-uri: https://accounts.spotify.com/api/token
@@ -128,16 +127,18 @@ spring:
   datasource:
     driver-class-name: org.postgresql.Driver
     hikari:
+      # Connection pool tuning for Render free-tier DB
       maximum-pool-size: 5
       minimum-idle: 2
-      idle-timeout: 30000
-      max-lifetime: 600000
-      connection-timeout: 30000
+      idle-timeout: 30000       # 30s before idle connection closes
+      max-lifetime: 600000      # 10 mins total lifetime
+      connection-timeout: 30000 # 30s max wait for new connection
+      leak-detection-threshold: 20000 # Log any connection open > 20s (debugging)
 
   jpa:
     show-sql: false
     hibernate:
-      ddl-auto: update # Keep data, safe schema evolution
+      ddl-auto: update # Keeps existing data; safe schema updates
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
@@ -160,7 +161,7 @@ springdoc:
 logging:
   level:
     com.audience: INFO
-    org.springframework.security: DEBUG
+    org.springframework.security: WARN
     org.hibernate.SQL: WARN
     org.springframework.web: INFO
   pattern:
@@ -172,7 +173,7 @@ app:
     timeout: 30000
 
   jwt:
-    expiration: 86400000 # keep same 24hr session
+    expiration: 86400000 # Keep same 24-hour session
 
   ai:
     story-mode-threshold: 80
@@ -180,4 +181,3 @@ app:
 audiance:
   security:
     encryptor-key: ${ENCRYPTOR_KEY:prod_encryptkey16}
-
