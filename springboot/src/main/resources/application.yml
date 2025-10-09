@@ -120,8 +120,6 @@ springdoc:
 # PRODUCTION PROFILE
 # ===============================================================
 spring:
-  profiles:
-    active: production
   config:
     activate:
       on-profile: production
