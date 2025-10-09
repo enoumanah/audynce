@@ -111,6 +111,7 @@ springdoc:
   api-docs:
     path: /api-docs
   swagger-ui:
+    useBasicAuthenticationWithAccessCodeGrant: true
     path: /swagger-ui.html
     operationsSorter: method
 

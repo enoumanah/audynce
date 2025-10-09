@@ -9,7 +9,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestRedirectFilter;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -28,12 +28,16 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+                // Enable CORS
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                // Disable CSRF (for REST APIs)
                 .csrf(csrf -> csrf.disable())
+                // Stateless sessions for JWT
                 .sessionManagement(session ->
-                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                )
+                // Public endpoints
                 .authorizeHttpRequests(auth -> auth
-                        // Public endpoints
                         .requestMatchers(
                                 "/api/health",
                                 "/api/auth/**",
@@ -42,26 +46,29 @@ public class SecurityConfig {
                                 "/swagger-ui.html",
                                 "/h2-console/**",
                                 "/oauth2/**",
-                                "/login/**"
+                                "/login/**",
+                                "/error"
                         ).permitAll()
-                        // All other endpoints require authentication
+                        // Secure all other endpoints
                         .anyRequest().authenticated()
                 )
+                // OAuth2 Login
                 .oauth2Login(oauth2 -> oauth2
                         .authorizationEndpoint(authorization ->
                                 authorization.baseUri("/oauth2/authorization")
                         )
                         .redirectionEndpoint(redir ->
+                                // this must match Spotify redirect in your app dashboard
                                 redir.baseUri("/login/oauth2/code/*")
                         )
-                        .userInfoEndpoint(userInfo ->
-                                {}
-                        )
+                        .userInfoEndpoint(userInfo -> {})
                         .successHandler(oAuth2SuccessHandler)
-                )
-                .addFilterBefore(jwtAuthenticationFilter, OAuth2AuthorizationRequestRedirectFilter.class);
+                );
 
-        // Allow H2 console frames
+        // Register JWT filter before UsernamePasswordAuthenticationFilter
+        http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+
+        // Allow H2 console frames (local dev only)
         http.headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()));
 
         return http.build();
@@ -70,11 +77,16 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(List.of("*"));
+
+        configuration.setAllowedOrigins(List.of(
+                "https://audiance.onrender.com",
+                "http://localhost:3000",
+                "http://localhost:8080"
+        ));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);
-        configuration.setExposedHeaders(Arrays.asList("Authorization", "Content-Type"));
+        configuration.setExposedHeaders(List.of("Authorization", "Content-Type"));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
