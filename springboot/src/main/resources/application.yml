@@ -16,7 +16,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: create-drop # Resets DB on each start, perfect for local dev
+      ddl-auto: create-drop # Resets DB on each start (local only)
     show-sql: true
     properties:
       hibernate:
@@ -42,7 +42,7 @@ spring:
               - playlist-modify-public
               - playlist-modify-private
             authorization-grant-type: authorization_code
-            redirect-uri: https://audiance.onrender.com/login/oauth2/code/spotify
+            redirect-uri: "{baseUrl}/login/oauth2/code/spotify"
             client-name: Spotify
         provider:
           spotify:
@@ -51,8 +51,9 @@ spring:
             user-info-uri: https://api.spotify.com/v1/me
             user-name-attribute: id
 
-
+# ===============================================================
 # Custom Application Properties
+# ===============================================================
 app:
   fastapi:
     url: ${FASTAPI_URL:http://localhost:8000}
@@ -70,48 +71,42 @@ app:
     accounts-url: https://accounts.spotify.com/api
     client-id: ${SPOTIFY_CLIENT_ID}
     client-secret: ${SPOTIFY_CLIENT_SECRET}
-    top-artists-cache-hours: 24 # Cache user's top artists for 24 hours
+    top-artists-cache-hours: 24
 
   ai:
     model: meta-llama/Llama-3.1-8B-Instruct
     huggingface-token: ${HUGGINGFACE_TOKEN}
-    story-mode-threshold: 100 # Word count threshold for story vs direct mode
-    max-scenes: 6 # Maximum scenes per story
+    story-mode-threshold: 100
+    max-scenes: 6
 
-  # Available genre options for user selection
-  app:
-    available:
-      genres: hip-hop,rnb,pop,afrobeats,dance,indie,rock,electronic,jazz,soul
+  available:
+    genres: hip-hop,rnb,pop,afrobeats,dance,indie,rock,electronic,jazz,soul
 
-  # Playlist generation settings
   playlist:
     min-tracks-per-scene: 3
     max-tracks-per-scene: 10
     default-tracks-per-scene: 5
     max-total-tracks: 50
 
-# IMPORTANT: This default encryption key is for local development ONLY.
-# It MUST be overridden by a secure 16-character environment variable in production.
 audiance:
   security:
-    encryptor-key: ${ENCRYPTOR_KEY:local_encryptkey}
+    encryptor-key: ${ENCRYPTOR_KEY:local_encryptkey16}
 
-# Server Configuration
 server:
   port: ${PORT:8080}
   error:
     include-message: always
     include-binding-errors: always
 
-# Logging
 logging:
   level:
     com.audience: DEBUG
     org.hibernate.SQL: DEBUG
     org.springframework.security: INFO
     org.springframework.web: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} %-5level %logger{36} - %msg%n"
 
-# API Documentation
 springdoc:
   api-docs:
     path: /api-docs
@@ -120,6 +115,7 @@ springdoc:
     operationsSorter: method
 
 ---
+
 # ===============================================================
 # PRODUCTION PROFILE
 # ===============================================================
@@ -134,12 +130,12 @@ spring:
   jpa:
     show-sql: false
     hibernate:
-      ddl-auto: update # Safe for prod: applies changes without dropping data
+      ddl-auto: update # Keep data, safe schema evolution
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: false
-        jdbc.lob.non_contextual_creation: true # Helps with Postgres Lob handling
+        jdbc.lob.non_contextual_creation: true
 
   h2:
     console:
@@ -160,8 +156,21 @@ logging:
     org.springframework.security: WARN
     org.hibernate.SQL: WARN
     org.springframework.web: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} %-5level %logger{36} - %msg%n"
 
-# Production overrides
 app:
+  fastapi:
+    url: ${FASTAPI_URL:https://audiance-fastapi.onrender.com}
+    timeout: 30000
+
+  jwt:
+    expiration: 86400000 # keep same 24hr session
+
   ai:
-    story-mode-threshold: 80 # Slightly lower in prod for better UX
+    story-mode-threshold: 80
+
+audiance:
+  security:
+    encryptor-key: ${ENCRYPTOR_KEY:prod_encryptkey16}
+
