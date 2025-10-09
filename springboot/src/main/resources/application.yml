@@ -161,7 +161,7 @@ springdoc:
 logging:
   level:
     com.audience: INFO
-    org.springframework.security: WARN
+    org.springframework.security: DEBUG
     org.hibernate.SQL: WARN
     org.springframework.web: INFO
   pattern:
