@@ -1,5 +1,8 @@
 package com.audience.app.service;
 
+import com.audience.app.dto.ai.AIAnalysisResponse;
+import com.audience.app.dto.ai.DirectModeAnalysis;
+import com.audience.app.dto.ai.SceneAnalysis;
 import com.audience.app.dto.request.PlaylistGenerateRequest;
 import com.audience.app.dto.response.PlaylistResponse;
 import com.audience.app.dto.response.SceneResponse;
@@ -28,6 +31,7 @@ public class PlaylistOrchestrationService {
     private final PlaylistRepository playlistRepository;
     private final SceneRepository sceneRepository;
     private final UserService userService;
+    private final AIServiceClient aiServiceClient;
     private final SpotifyService spotifyService;
 
     @Value("${app.playlist.default-tracks-per-scene:5}")
@@ -38,7 +42,6 @@ public class PlaylistOrchestrationService {
 
     /**
      * Main method: Generate complete playlist from user prompt
-     * MOCK VERSION - No AI integration yet
      */
     @Transactional
     public PlaylistResponse generatePlaylist(String spotifyId, PlaylistGenerateRequest request) {
@@ -50,28 +53,38 @@ public class PlaylistOrchestrationService {
         User user = userService.findBySpotifyId(spotifyId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        // 2. Get user's top artists for personalization (if enabled)
+        // 2. Call AI service to analyze prompt
+        AIAnalysisResponse aiAnalysis = aiServiceClient.analyzePrompt(
+                request.getPrompt(),
+                request.getSelectedGenres()
+        );
+
+        // 3. Get user's top artists for personalization (if enabled)
         List<String> topArtists = new ArrayList<>();
         if (request.getUsePersonalization()) {
             topArtists = spotifyService.getUserTopArtists(user, 2);
             log.info("Using {} top artists for personalization", topArtists.size());
         }
 
-        // 3. Create playlist entity
-        Playlist playlist = createMockPlaylist(user, request);
+        // 4. Create playlist entity
+        Playlist playlist = createPlaylistEntity(user, request, aiAnalysis);
 
-        // 4. Generate scenes and tracks (MOCK - simple logic)
-        generateMockScenes(playlist, request, topArtists, user);
+        // 5. Generate scenes and tracks based on AI analysis mode
+        if (aiAnalysis.getMode() == AIAnalysisResponse.AnalysisMode.STORY) {
+            generateStoryModePlaylist(playlist, aiAnalysis, request, topArtists, user);
+        } else {
+            generateDirectModePlaylist(playlist, aiAnalysis, request, topArtists, user);
+        }
 
-        // 5. Save playlist
+        // 6. Save playlist
         Playlist savedPlaylist = playlistRepository.save(playlist);
 
-        // 6. Create Spotify playlist if requested
+        // 7. Create Spotify playlist if requested
         if (request.getCreateSpotifyPlaylist()) {
             createSpotifyPlaylistForUser(savedPlaylist, user);
         }
 
-        // 7. Calculate generation time
+        // 8. Calculate generation time
         long endTime = System.currentTimeMillis();
         savedPlaylist.setGenerationTimeMs(endTime - startTime);
         savedPlaylist = playlistRepository.save(savedPlaylist);
@@ -86,55 +99,35 @@ public class PlaylistOrchestrationService {
     }
 
     /**
-     * MOCK: Create playlist entity without AI
+     * Generate playlist for STORY mode (multiple scenes)
      */
-    private Playlist createMockPlaylist(User user, PlaylistGenerateRequest request) {
-        String title = "Playlist: " + truncate(request.getPrompt(), 40);
-        String description = "Generated from: " + truncate(request.getPrompt(), 80);
+    private void generateStoryModePlaylist(Playlist playlist, AIAnalysisResponse aiAnalysis,
+                                           PlaylistGenerateRequest request, List<String> topArtists, User user) {
 
-        return Playlist.builder()
-                .title(title)
-                .description(description)
-                .originalNarrative(request.getPrompt())
-                .aiAnalysisId("mock-" + System.currentTimeMillis())
-                .user(user)
-                .isPublic(request.getIsPublic())
-                .build();
-    }
-
-    /**
-     * MOCK: Generate scenes based on simple logic
-     */
-    private void generateMockScenes(Playlist playlist, PlaylistGenerateRequest request,
-                                    List<String> topArtists, User user) {
+        log.info("Generating STORY mode playlist with {} scenes", aiAnalysis.getScenes().size());
 
         int tracksPerScene = request.getTracksPerScene() != null
                 ? request.getTracksPerScene()
                 : defaultTracksPerScene;
 
-        // Determine number of scenes based on prompt length
-        int wordCount = request.getPrompt().split("\\s+").length;
-        int sceneCount = wordCount > 100 ? 3 : 1; // Story mode vs Direct mode
+        String accessToken = user.getAccessToken();
 
-        // Create scenes
-        for (int i = 1; i <= sceneCount; i++) {
-            MoodType sceneMood = determineSceneMood(i, sceneCount, request.getOverallMood());
-
+        for (SceneAnalysis sceneAnalysis : aiAnalysis.getScenes()) {
             Scene scene = Scene.builder()
                     .playlist(playlist)
-                    .sceneNumber(i)
-                    .mood(sceneMood)
-                    .description(String.format("Scene %d - %s mood", i, sceneMood.toString().toLowerCase()))
+                    .sceneNumber(sceneAnalysis.getSceneNumber())
+                    .mood(sceneAnalysis.getMood())
+                    .description(sceneAnalysis.getDescription())
                     .build();
 
             // Get tracks for this scene
             List<Track> tracks = getTracksForScene(
                     scene,
-                    sceneMood,
+                    sceneAnalysis,
                     request.getSelectedGenres(),
                     topArtists,
                     tracksPerScene,
-                    user.getAccessToken()
+                    accessToken
             );
 
             scene.setTracks(tracks);
@@ -143,37 +136,60 @@ public class PlaylistOrchestrationService {
     }
 
     /**
-     * MOCK: Simple mood determination logic
+     * Generate playlist for DIRECT mode (single scene, simpler)
      */
-    private MoodType determineSceneMood(int sceneNumber, int totalScenes, MoodType requestedMood) {
-        if (totalScenes == 1) {
-            return requestedMood != null ? requestedMood : MoodType.BALANCED;
-        }
+    private void generateDirectModePlaylist(Playlist playlist, AIAnalysisResponse aiAnalysis,
+                                            PlaylistGenerateRequest request, List<String> topArtists, User user) {
 
-        // For multi-scene: vary the mood
-        switch (sceneNumber) {
-            case 1: return MoodType.PEACEFUL;
-            case 2: return requestedMood != null ? requestedMood : MoodType.UPBEAT;
-            case 3: return MoodType.NOSTALGIC;
-            default: return MoodType.BALANCED;
-        }
+        log.info("Generating DIRECT mode playlist");
+
+        DirectModeAnalysis directAnalysis = aiAnalysis.getDirectAnalysis();
+
+        int totalTracks = Math.min(
+                request.getTracksPerScene() != null ? request.getTracksPerScene() * 2 : 10,
+                maxTotalTracks
+        );
+
+        Scene scene = Scene.builder()
+                .playlist(playlist)
+                .sceneNumber(1)
+                .mood(directAnalysis.getMood())
+                .description(directAnalysis.getTheme())
+                .build();
+
+        // Get tracks
+        List<Track> tracks = getTracksForDirectMode(
+                scene,
+                directAnalysis,
+                request.getSelectedGenres(),
+                topArtists,
+                totalTracks,
+                user.getAccessToken()
+        );
+
+        scene.setTracks(tracks);
+        playlist.getScenes().add(scene);
     }
 
     /**
-     * Get tracks for a scene using Spotify recommendations
+     * Get tracks for a story scene using mood profiles
      */
-    private List<Track> getTracksForScene(Scene scene, MoodType mood,
+    private List<Track> getTracksForScene(Scene scene, SceneAnalysis sceneAnalysis,
                                           List<String> selectedGenres, List<String> topArtists,
                                           int limit, String accessToken) {
 
-        // Get mood profile
-        MoodProfile moodProfile = spotifyService.getMoodProfile(mood);
+        // Get mood profile for this scene
+        MoodProfile moodProfile = spotifyService.getMoodProfile(sceneAnalysis.getMood());
+
+        // Determine genres (prefer AI suggestions, fallback to user selection)
+        List<String> genres = sceneAnalysis.getSuggestedGenres() != null
+                && !sceneAnalysis.getSuggestedGenres().isEmpty()
+                ? sceneAnalysis.getSuggestedGenres()
+                : selectedGenres;
 
         // Build recommendation request
         SpotifyRecommendationRequest recommendationRequest = SpotifyRecommendationRequest.builder()
-                .seedGenres(selectedGenres != null && !selectedGenres.isEmpty()
-                        ? selectedGenres.stream().limit(3).collect(Collectors.toList())
-                        : List.of("pop", "indie"))
+                .seedGenres(genres != null ? genres.stream().limit(3).collect(Collectors.toList()) : List.of())
                 .seedArtists(topArtists.stream().limit(2).collect(Collectors.toList()))
                 .moodProfile(moodProfile)
                 .limit(limit)
@@ -185,17 +201,9 @@ public class PlaylistOrchestrationService {
                 accessToken
         );
 
-        // If no recommendations, try fallback search
-        if (spotifyTracks.isEmpty()) {
-            log.warn("No recommendations found, using fallback search");
-            String searchQuery = mood.toString().toLowerCase() + " " +
-                    (selectedGenres != null && !selectedGenres.isEmpty() ? selectedGenres.get(0) : "music");
-            spotifyTracks = spotifyService.searchTracks(searchQuery, limit, accessToken);
-        }
-
         // Convert to Track entities
         List<Track> tracks = new ArrayList<>();
-        for (int i = 0; i < spotifyTracks.size() && i < limit; i++) {
+        for (int i = 0; i < spotifyTracks.size(); i++) {
             Map<String, Object> spotifyTrack = spotifyTracks.get(i);
             Track track = mapSpotifyTrackToEntity(spotifyTrack, scene, i + 1);
             tracks.add(track);
@@ -203,6 +211,44 @@ public class PlaylistOrchestrationService {
 
         log.info("Generated {} tracks for scene {} ({})",
                 tracks.size(), scene.getSceneNumber(), scene.getMood());
+
+        return tracks;
+    }
+
+    /**
+     * Get tracks for direct mode
+     */
+    private List<Track> getTracksForDirectMode(Scene scene, DirectModeAnalysis directAnalysis,
+                                               List<String> selectedGenres, List<String> topArtists,
+                                               int limit, String accessToken) {
+
+        MoodProfile moodProfile = spotifyService.getMoodProfile(directAnalysis.getMood());
+
+        List<String> genres = directAnalysis.getExtractedGenres() != null
+                && !directAnalysis.getExtractedGenres().isEmpty()
+                ? directAnalysis.getExtractedGenres()
+                : selectedGenres;
+
+        SpotifyRecommendationRequest recommendationRequest = SpotifyRecommendationRequest.builder()
+                .seedGenres(genres.stream().limit(3).collect(Collectors.toList()))
+                .seedArtists(topArtists.stream().limit(2).collect(Collectors.toList()))
+                .moodProfile(moodProfile)
+                .limit(limit)
+                .build();
+
+        List<Map<String, Object>> spotifyTracks = spotifyService.getRecommendations(
+                recommendationRequest,
+                accessToken
+        );
+
+        List<Track> tracks = new ArrayList<>();
+        for (int i = 0; i < spotifyTracks.size(); i++) {
+            Map<String, Object> spotifyTrack = spotifyTracks.get(i);
+            Track track = mapSpotifyTrackToEntity(spotifyTrack, scene, i + 1);
+            tracks.add(track);
+        }
+
+        log.info("Generated {} tracks for direct mode", tracks.size());
 
         return tracks;
     }
@@ -241,11 +287,6 @@ public class PlaylistOrchestrationService {
                     .map(track -> "spotify:track:" + track.getSpotifyId())
                     .collect(Collectors.toList());
 
-            if (trackUris.isEmpty()) {
-                log.warn("No tracks to add to Spotify playlist");
-                return;
-            }
-
             String spotifyPlaylistId = spotifyService.createSpotifyPlaylist(
                     user,
                     playlist.getTitle(),
@@ -261,6 +302,47 @@ public class PlaylistOrchestrationService {
 
         } catch (Exception e) {
             log.error("Failed to create Spotify playlist", e);
+        }
+    }
+
+    /**
+     * Create playlist entity from request
+     */
+    private Playlist createPlaylistEntity(User user, PlaylistGenerateRequest request,
+                                          AIAnalysisResponse aiAnalysis) {
+        String title = generatePlaylistTitle(request.getPrompt(), aiAnalysis);
+        String description = generatePlaylistDescription(request.getPrompt(), aiAnalysis);
+
+        return Playlist.builder()
+                .title(title)
+                .description(description)
+                .originalNarrative(request.getPrompt())
+                .aiAnalysisId(aiAnalysis.getAnalysisId())
+                .user(user)
+                .isPublic(request.getIsPublic())
+                .build();
+    }
+
+    /**
+     * Generate playlist title from prompt
+     */
+    private String generatePlaylistTitle(String prompt, AIAnalysisResponse aiAnalysis) {
+        if (aiAnalysis.getMode() == AIAnalysisResponse.AnalysisMode.STORY) {
+            return "Story Soundtrack: " + truncate(prompt, 30);
+        } else {
+            return truncate(prompt, 50);
+        }
+    }
+
+    /**
+     * Generate playlist description
+     */
+    private String generatePlaylistDescription(String prompt, AIAnalysisResponse aiAnalysis) {
+        if (aiAnalysis.getMode() == AIAnalysisResponse.AnalysisMode.STORY) {
+            return String.format("A %d-scene musical journey through your story",
+                    aiAnalysis.getScenes().size());
+        } else {
+            return "Your personalized playlist created by Audiance";
         }
     }
 
