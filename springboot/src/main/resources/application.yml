@@ -116,9 +116,8 @@ springdoc:
     operationsSorter: method
 
 ---
-
 # ===============================================================
-# PRODUCTION PROFILE
+# PRODUCTION PROFILE (optimized for Supabase + Render)
 # ===============================================================
 spring:
   config:
@@ -126,20 +125,22 @@ spring:
       on-profile: production
 
   datasource:
+    url: ${DATABASE_URL}
     driver-class-name: org.postgresql.Driver
     hikari:
-      # Connection pool tuning for Render free-tier DB
-      maximum-pool-size: 5
+      # Connection pool tuning for Supabase free-tier (max 20–25 connections total)
+      maximum-pool-size: 5       # Never exceed this or Supabase will reject connections
       minimum-idle: 2
-      idle-timeout: 30000       # 30s before idle connection closes
-      max-lifetime: 600000      # 10 mins total lifetime
-      connection-timeout: 30000 # 30s max wait for new connection
-      leak-detection-threshold: 20000 # Log any connection open > 20s (debugging)
+      idle-timeout: 30000        # 30s idle connections are closed
+      max-lifetime: 600000       # 10 min total connection lifespan
+      connection-timeout: 30000  # Wait up to 30s for a connection
+      leak-detection-threshold: 20000 # Warn if any connection open > 20s
+      pool-name: AudianceHikariPool
 
   jpa:
     show-sql: false
     hibernate:
-      ddl-auto: update # Keeps existing data; safe schema updates
+      ddl-auto: update            # Keeps existing data; safe schema updates
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
