@@ -11,6 +11,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -118,7 +119,6 @@ public class SpotifyService {
             String accessToken) {
 
         WebClient webClient = webClientBuilder.baseUrl(spotifyApiUrl).build();
-
         MoodProfile mood = request.getMoodProfile();
 
         Map<String, Object> queryParams = new HashMap<>();
@@ -162,6 +162,17 @@ public class SpotifyService {
         log.info("Requesting recommendations with params: {}", queryParams);
 
         try {
+            //  Guard clause — ensure seeds exist before calling Spotify API
+            if ((!queryParams.containsKey("seed_artists") ||
+                    ((String) queryParams.get("seed_artists")).isBlank()) &&
+                    (!queryParams.containsKey("seed_genres") ||
+                            ((String) queryParams.get("seed_genres")).isBlank())) {
+
+                log.warn("No valid seeds provided — skipping Spotify recommendations call");
+                return Collections.emptyList();
+            }
+
+            //  Make the API call
             Map<String, Object> response = webClient.get()
                     .uri(uriBuilder -> {
                         var builder = uriBuilder.path("/recommendations");
@@ -179,6 +190,8 @@ public class SpotifyService {
                 return tracks;
             }
 
+        } catch (WebClientResponseException e) {
+            log.error("Spotify API error: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
         } catch (Exception e) {
             log.error("Error getting recommendations", e);
         }
