@@ -1,0 +1,38 @@
+# ──────────────────────────────
+# 1️⃣ Base Image
+# ──────────────────────────────
+FROM python:3.11-alpine
+
+# ──────────────────────────────
+# 2️⃣ Environment setup
+# ──────────────────────────────
+WORKDIR /app
+
+# Prevent Python from writing .pyc files and buffering output
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Install system dependencies (for things like motor, uvicorn, etc.)
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ──────────────────────────────
+# 3️⃣ Copy project files
+# ──────────────────────────────
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+# ──────────────────────────────
+# 4️⃣ Set environment defaults
+# These can be overridden in Render’s dashboard
+# ──────────────────────────────
+ENV PORT=8000
+
+# ──────────────────────────────
+# 5️⃣ Run FastAPI app using Uvicorn
+# ──────────────────────────────
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
