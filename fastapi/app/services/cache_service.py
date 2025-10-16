@@ -24,13 +24,13 @@ class CacheService:
     
     async def close(self):
         """Close MongoDB connection"""
-        if self.client:
+        if self.client is not None:
             self.client.close()
             logger.info("Closed MongoDB connection")
     
     async def get_cached_analysis(self, prompt_hash: str):
         """Retrieve cached analysis"""
-        if not self.collection:
+        if self.collection is None:
             return None
         
         try:
@@ -42,18 +42,13 @@ class CacheService:
     
     async def cache_analysis(self, prompt_hash: str, analysis: dict):
         """Store analysis in cache"""
-        if not self.collection:
+        if self.collection is None:
             return
         
         try:
             await self.collection.update_one(
                 {"prompt_hash": prompt_hash},
-                {
-                    "$set": {
-                        **analysis,
-                        "cached_at": datetime.utcnow()
-                    }
-                },
+                {"$set": {**analysis, "cached_at": datetime.utcnow()}},
                 upsert=True
             )
             logger.info(f"Cached analysis for hash: {prompt_hash}")

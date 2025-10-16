@@ -56,7 +56,7 @@ async def health_check():
     return {
         "status": "healthy",
         "model": settings.model_name,
-        "mongodb": "connected" if cache_service.collection else "disconnected"
+        "mongodb": "connected" if cache_service.collection is not None else "disconnected"
     }
 
 @app.post("/ai/analyze", response_model=AIAnalysisResponse)
