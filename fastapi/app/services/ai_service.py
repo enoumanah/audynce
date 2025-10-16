@@ -1,7 +1,8 @@
-# app/services/ai_service.py
 import httpx
 import json
 import logging
+import time
+import os
 from typing import Dict, List
 from app.config.settings import settings
 from app.models.schemas import (
@@ -14,9 +15,12 @@ logger = logging.getLogger(__name__)
 
 class AIService:
     def __init__(self):
-        self.api_url = f"https://api-inference.huggingface.co/models/{settings.model_name}"
-        self.headers = {"Authorization": f"Bearer {settings.huggingface_token}"}
-    
+        self.api_url = "https://api-inference.huggingface.co/v1/chat/completions"
+        self.headers = {
+            "Authorization": f"Bearer {os.environ.get('HUGGINGFACE_TOKEN')}",
+            "Content-Type": "application/json",
+        }
+
     async def analyze_prompt(self, prompt: str, selected_genres: List[str], story_threshold: int) -> AIAnalysisResponse:
         """Main analysis method - determines mode and analyzes accordingly"""
         word_count = len(prompt.split())
@@ -40,41 +44,40 @@ class AIService:
                 mode=mode,
                 direct_analysis=direct_analysis
             )
-    
+
     async def _analyze_story(self, prompt: str, selected_genres: List[str]) -> List[SceneAnalysis]:
         """Analyze a long story into multiple scenes"""
         system_prompt = build_story_prompt(prompt, selected_genres)
-        
         try:
             response = await self._call_huggingface(system_prompt)
             return self._parse_story_response(response, selected_genres)
         except Exception as e:
             logger.error(f"Error in story analysis: {e}")
             return self._fallback_story_scenes(prompt, selected_genres)
-    
+
     async def _analyze_direct(self, prompt: str, selected_genres: List[str]) -> DirectModeAnalysis:
         """Analyze a short prompt for direct playlist generation"""
         system_prompt = build_direct_prompt(prompt, selected_genres)
-        
         try:
             response = await self._call_huggingface(system_prompt)
             return self._parse_direct_response(response, selected_genres)
         except Exception as e:
             logger.error(f"Error in direct analysis: {e}")
             return self._fallback_direct_analysis(prompt, selected_genres)
-    
+
     async def _call_huggingface(self, prompt: str) -> str:
-        """Call Hugging Face Inference API"""
+        """Call Hugging Face Chat Completions API"""
         payload = {
-            "inputs": prompt,
-            "parameters": {
-                "max_new_tokens": 800,
-                "temperature": 0.7,
-                "top_p": 0.9,
-                "return_full_text": False
-            }
+            "model": settings.model_name,
+            "messages": [
+                {"role": "system", "content": "You are a creative AI that analyzes stories to generate structured music moods and genres."},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 800,
+            "temperature": 0.7,
+            "top_p": 0.9,
         }
-        
+
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
                 self.api_url,
@@ -83,15 +86,11 @@ class AIService:
             )
             response.raise_for_status()
             result = response.json()
-            
-            if isinstance(result, list) and len(result) > 0:
-                return result[0].get("generated_text", "")
-            return str(result)
-    
+            return result["choices"][0]["message"]["content"]
+
     def _parse_story_response(self, response: str, selected_genres: List[str]) -> List[SceneAnalysis]:
         """Parse AI response into scene objects"""
         try:
-            # Try to extract JSON from response
             json_start = response.find('{')
             json_end = response.rfind('}') + 1
             if json_start != -1 and json_end > json_start:
@@ -110,10 +109,8 @@ class AIService:
                 return scenes
         except Exception as e:
             logger.warning(f"Failed to parse JSON response: {e}")
-        
-        # Fallback to simple parsing
         return self._fallback_story_scenes("", selected_genres)
-    
+
     def _parse_direct_response(self, response: str, selected_genres: List[str]) -> DirectModeAnalysis:
         """Parse AI response for direct mode"""
         try:
@@ -131,9 +128,8 @@ class AIService:
                 )
         except Exception as e:
             logger.warning(f"Failed to parse direct response: {e}")
-        
         return self._fallback_direct_analysis("", selected_genres)
-    
+
     def _fallback_story_scenes(self, prompt: str, selected_genres: List[str]) -> List[SceneAnalysis]:
         """Fallback scenes when AI fails"""
         return [
@@ -159,7 +155,7 @@ class AIService:
                 energy_level="medium"
             )
         ]
-    
+
     def _fallback_direct_analysis(self, prompt: str, selected_genres: List[str]) -> DirectModeAnalysis:
         """Fallback for direct mode when AI fails"""
         return DirectModeAnalysis(
@@ -168,5 +164,3 @@ class AIService:
             keywords=["music", "playlist"],
             theme=prompt[:50] if prompt else "General playlist"
         )
-
-import time
