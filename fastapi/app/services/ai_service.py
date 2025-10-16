@@ -66,27 +66,39 @@ class AIService:
             return self._fallback_direct_analysis(prompt, selected_genres)
 
     async def _call_huggingface(self, prompt: str) -> str:
-        """Call Hugging Face Chat Completions API"""
+        """Call Hugging Face Inference API (text generation endpoint)."""
+        api_url = f"https://api-inference.huggingface.co/models/{settings.model_name}"
+
         payload = {
-            "model": settings.model_name,
-            "messages": [
-                {"role": "system", "content": "You are a creative AI that analyzes stories to generate structured music moods and genres."},
-                {"role": "user", "content": prompt}
-            ],
-            "max_tokens": 800,
-            "temperature": 0.7,
-            "top_p": 0.9,
+            "inputs": prompt,
+            "parameters": {
+                "max_new_tokens": 512,
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "return_full_text": False
+            },
+            "options": {"wait_for_model": True}
         }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                self.api_url,
-                headers=self.headers,
-                json=payload
-            )
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            response = await client.post(api_url, headers=self.headers, json=payload)
+
+            # Raise for non-2xx responses
             response.raise_for_status()
+
             result = response.json()
-            return result["choices"][0]["message"]["content"]
+
+            # Handle expected result structure
+            if isinstance(result, list) and len(result) > 0 and "generated_text" in result[0]:
+                return result[0]["generated_text"].strip()
+
+            # Handle inference errors
+            elif isinstance(result, dict) and "error" in result:
+                raise Exception(f"HuggingFace error: {result['error']}")
+
+            else:
+                return str(result)
+
 
     def _parse_story_response(self, response: str, selected_genres: List[str]) -> List[SceneAnalysis]:
         """Parse AI response into scene objects"""
