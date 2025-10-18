@@ -5,7 +5,7 @@ from typing import Optional
 
 class Settings(BaseSettings):
     huggingface_token: Optional[str] = None
-    huggingface_model: str = "meta-llama/Llama-3.1-8B-Instruct"
+    huggingface_model: str = "HuggingFaceH4/zephyr-7b-beta"
     mongodb_uri: Optional[str] = None
     mongodb_database: str = "audynce"
     story_mode_threshold: int = 80
