@@ -1,11 +1,10 @@
 # app/services/ai_service.py
-import httpx
 import json
 import logging
 import time
 import os
-import asyncio
 from typing import Dict, List
+from huggingface_hub import InferenceClient
 from app.config.settings import settings
 from app.models.schemas import (
     AnalysisMode, MoodType, SceneAnalysis, 
@@ -17,10 +16,8 @@ logger = logging.getLogger(__name__)
 
 class AIService:
     def __init__(self):
-        self.headers = {
-            "Authorization": f"Bearer {os.environ.get('HUGGINGFACE_TOKEN')}",
-            "Content-Type": "application/json",
-        }
+        # Use HuggingFace's official InferenceClient
+        self.client = InferenceClient(token=os.environ.get('HUGGINGFACE_TOKEN'))
 
     async def analyze_prompt(self, prompt: str, selected_genres: List[str], story_threshold: int) -> AIAnalysisResponse:
         """Main analysis method - determines mode and analyzes accordingly"""
@@ -67,76 +64,32 @@ class AIService:
             return self._fallback_direct_analysis(prompt, selected_genres)
 
     async def _call_huggingface(self, prompt: str) -> str:
-        """Call HuggingFace Inference API using standard text generation."""
+        """Call HuggingFace using the official InferenceClient."""
         
-        # Build the API URL for the specific model
-        api_url = f"https://api-inference.huggingface.co/models/{settings.huggingface_model}"
-        
-        payload = {
-            "inputs": prompt,
-            "parameters": {
-                "max_new_tokens": 600,
-                "temperature": 0.7,
-                "top_p": 0.9,
-                "return_full_text": False,
-                "do_sample": True
-            },
-            "options": {
-                "wait_for_model": True,
-                "use_cache": False
-            }
-        }
-
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            try:
-                logger.info(f"Calling HuggingFace API: {api_url}")
-                response = await client.post(
-                    api_url, 
-                    headers=self.headers, 
-                    json=payload
-                )
-                
-                # Log response for debugging
-                logger.info(f"HuggingFace response status: {response.status_code}")
-                
-                # Raise for non-2xx responses
-                response.raise_for_status()
-                
-                result = response.json()
-                logger.debug(f"HuggingFace raw response: {result}")
-                
-                # Handle standard text generation response
-                if isinstance(result, list) and len(result) > 0:
-                    if "generated_text" in result[0]:
-                        return result[0]["generated_text"].strip()
-                    elif "error" in result[0]:
-                        raise Exception(f"HuggingFace API error: {result[0]['error']}")
-                    else:
-                        logger.warning(f"Unexpected list response format: {result}")
-                        raise Exception("Unexpected response format from HuggingFace")
-                
-                # Handle error responses
-                elif isinstance(result, dict) and "error" in result:
-                    raise Exception(f"HuggingFace API error: {result['error']}")
-                
-                else:
-                    logger.warning(f"Unexpected response format: {result}")
-                    raise Exception("Unexpected response format from HuggingFace")
+        try:
+            logger.info(f"Calling HuggingFace model: {settings.huggingface_model}")
+            
+            # Use text_generation with the InferenceClient
+            # This properly handles the serverless API
+            response = self.client.text_generation(
+                prompt=prompt,
+                model=settings.huggingface_model,
+                max_new_tokens=600,
+                temperature=0.7,
+                top_p=0.9,
+                do_sample=True,
+                return_full_text=False
+            )
+            
+            logger.info("HuggingFace API call successful")
+            return response.strip()
                     
-            except httpx.HTTPStatusError as e:
-                error_detail = e.response.text
-                logger.error(f"HTTP error from HuggingFace: {e.response.status_code} - {error_detail}")
-                
-                # Check if model is loading
-                if e.response.status_code == 503:
-                    logger.warning("Model is loading, will retry...")
-                    await asyncio.sleep(10)
-                    raise Exception("Model is still loading, please try again")
-                
-                raise
-            except Exception as e:
-                logger.error(f"Error calling HuggingFace API: {e}")
-                raise
+        except Exception as e:
+            logger.error(f"Error calling HuggingFace API: {e}")
+            # Check if it's a model loading error (503)
+            if "503" in str(e) or "loading" in str(e).lower():
+                logger.warning("Model is loading, using fallback")
+            raise
 
     def _parse_story_response(self, response: str, selected_genres: List[str]) -> List[SceneAnalysis]:
         """Parse AI response into scene objects"""
