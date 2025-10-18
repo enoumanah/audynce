@@ -74,7 +74,7 @@ app:
     top-artists-cache-hours: 24
 
   ai:
-    model: meta-llama/Llama-3.1-8B-Instruct
+    model: mistralai/Mistral-7B-Instruct-v0.2
     huggingface-token: ${HUGGINGFACE_TOKEN}
     story-mode-threshold: 100
     max-scenes: 6

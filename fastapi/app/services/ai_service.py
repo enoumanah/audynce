@@ -4,6 +4,7 @@ import json
 import logging
 import time
 import os
+import asyncio
 from typing import Dict, List
 from app.config.settings import settings
 from app.models.schemas import (
@@ -16,8 +17,6 @@ logger = logging.getLogger(__name__)
 
 class AIService:
     def __init__(self):
-        # Use the chat completions endpoint for better model support
-        self.api_url = "https://api-inference.huggingface.co/v1/chat/completions"
         self.headers = {
             "Authorization": f"Bearer {os.environ.get('HUGGINGFACE_TOKEN')}",
             "Content-Type": "application/json",
@@ -68,50 +67,72 @@ class AIService:
             return self._fallback_direct_analysis(prompt, selected_genres)
 
     async def _call_huggingface(self, prompt: str) -> str:
-        """Call Hugging Face Inference API using chat completions format."""
+        """Call HuggingFace Inference API using standard text generation."""
+        
+        # Build the API URL for the specific model
+        api_url = f"https://api-inference.huggingface.co/models/{settings.huggingface_model}"
         
         payload = {
-            "model": settings.huggingface_model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            "max_tokens": 512,
-            "temperature": 0.7,
-            "top_p": 0.9,
-            "stream": False
+            "inputs": prompt,
+            "parameters": {
+                "max_new_tokens": 600,
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "return_full_text": False,
+                "do_sample": True
+            },
+            "options": {
+                "wait_for_model": True,
+                "use_cache": False
+            }
         }
 
-        async with httpx.AsyncClient(timeout=90.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             try:
+                logger.info(f"Calling HuggingFace API: {api_url}")
                 response = await client.post(
-                    self.api_url, 
+                    api_url, 
                     headers=self.headers, 
                     json=payload
                 )
+                
+                # Log response for debugging
+                logger.info(f"HuggingFace response status: {response.status_code}")
                 
                 # Raise for non-2xx responses
                 response.raise_for_status()
                 
                 result = response.json()
+                logger.debug(f"HuggingFace raw response: {result}")
                 
-                # Extract content from chat completions format
-                if "choices" in result and len(result["choices"]) > 0:
-                    content = result["choices"][0]["message"]["content"]
-                    return content.strip()
+                # Handle standard text generation response
+                if isinstance(result, list) and len(result) > 0:
+                    if "generated_text" in result[0]:
+                        return result[0]["generated_text"].strip()
+                    elif "error" in result[0]:
+                        raise Exception(f"HuggingFace API error: {result[0]['error']}")
+                    else:
+                        logger.warning(f"Unexpected list response format: {result}")
+                        raise Exception("Unexpected response format from HuggingFace")
                 
                 # Handle error responses
-                elif "error" in result:
+                elif isinstance(result, dict) and "error" in result:
                     raise Exception(f"HuggingFace API error: {result['error']}")
                 
                 else:
                     logger.warning(f"Unexpected response format: {result}")
-                    return str(result)
+                    raise Exception("Unexpected response format from HuggingFace")
                     
             except httpx.HTTPStatusError as e:
-                logger.error(f"HTTP error from HuggingFace: {e.response.status_code} - {e.response.text}")
+                error_detail = e.response.text
+                logger.error(f"HTTP error from HuggingFace: {e.response.status_code} - {error_detail}")
+                
+                # Check if model is loading
+                if e.response.status_code == 503:
+                    logger.warning("Model is loading, will retry...")
+                    await asyncio.sleep(10)
+                    raise Exception("Model is still loading, please try again")
+                
                 raise
             except Exception as e:
                 logger.error(f"Error calling HuggingFace API: {e}")
@@ -120,8 +141,10 @@ class AIService:
     def _parse_story_response(self, response: str, selected_genres: List[str]) -> List[SceneAnalysis]:
         """Parse AI response into scene objects"""
         try:
+            # Try to find JSON in the response
             json_start = response.find('{')
             json_end = response.rfind('}') + 1
+            
             if json_start != -1 and json_end > json_start:
                 json_str = response[json_start:json_end]
                 data = json.loads(json_str)
@@ -135,16 +158,24 @@ class AIService:
                         suggested_genres=scene_data.get("genres", selected_genres[:3]),
                         energy_level=scene_data.get("energy", "medium")
                     ))
-                return scenes
+                
+                if scenes:
+                    return scenes
+                    
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse JSON response: {e}. Response: {response[:200]}")
         except Exception as e:
-            logger.warning(f"Failed to parse JSON response: {e}")
+            logger.warning(f"Error parsing response: {e}")
+            
         return self._fallback_story_scenes("", selected_genres)
 
     def _parse_direct_response(self, response: str, selected_genres: List[str]) -> DirectModeAnalysis:
         """Parse AI response for direct mode"""
         try:
+            # Try to find JSON in the response
             json_start = response.find('{')
             json_end = response.rfind('}') + 1
+            
             if json_start != -1 and json_end > json_start:
                 json_str = response[json_start:json_end]
                 data = json.loads(json_str)
@@ -155,12 +186,17 @@ class AIService:
                     keywords=data.get("keywords", []),
                     theme=data.get("theme", "Music playlist")
                 )
+                
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse JSON response: {e}. Response: {response[:200]}")
         except Exception as e:
-            logger.warning(f"Failed to parse direct response: {e}")
+            logger.warning(f"Error parsing response: {e}")
+            
         return self._fallback_direct_analysis("", selected_genres)
 
     def _fallback_story_scenes(self, prompt: str, selected_genres: List[str]) -> List[SceneAnalysis]:
         """Fallback scenes when AI fails"""
+        logger.info("Using fallback story scenes")
         return [
             SceneAnalysis(
                 scene_number=1,
@@ -187,6 +223,7 @@ class AIService:
 
     def _fallback_direct_analysis(self, prompt: str, selected_genres: List[str]) -> DirectModeAnalysis:
         """Fallback for direct mode when AI fails"""
+        logger.info("Using fallback direct analysis")
         return DirectModeAnalysis(
             mood=MoodType.BALANCED,
             extracted_genres=selected_genres if selected_genres else ["pop", "indie"],
