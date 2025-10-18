@@ -1,3 +1,4 @@
+# app/services/ai_service.py
 import httpx
 import json
 import logging
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 class AIService:
     def __init__(self):
+        # Use the chat completions endpoint for better model support
         self.api_url = "https://api-inference.huggingface.co/v1/chat/completions"
         self.headers = {
             "Authorization": f"Bearer {os.environ.get('HUGGINGFACE_TOKEN')}",
@@ -66,39 +68,54 @@ class AIService:
             return self._fallback_direct_analysis(prompt, selected_genres)
 
     async def _call_huggingface(self, prompt: str) -> str:
-        """Call Hugging Face Inference API (text generation endpoint)."""
-        api_url = f"https://api-inference.huggingface.co/models/{settings.model_name}"
-
+        """Call Hugging Face Inference API using chat completions format."""
+        
         payload = {
-            "inputs": prompt,
-            "parameters": {
-                "max_new_tokens": 512,
-                "temperature": 0.7,
-                "top_p": 0.9,
-                "return_full_text": False
-            },
-            "options": {"wait_for_model": True}
+            "model": settings.huggingface_model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "max_tokens": 512,
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "stream": False
         }
 
         async with httpx.AsyncClient(timeout=90.0) as client:
-            response = await client.post(api_url, headers=self.headers, json=payload)
-
-            # Raise for non-2xx responses
-            response.raise_for_status()
-
-            result = response.json()
-
-            # Handle expected result structure
-            if isinstance(result, list) and len(result) > 0 and "generated_text" in result[0]:
-                return result[0]["generated_text"].strip()
-
-            # Handle inference errors
-            elif isinstance(result, dict) and "error" in result:
-                raise Exception(f"HuggingFace error: {result['error']}")
-
-            else:
-                return str(result)
-
+            try:
+                response = await client.post(
+                    self.api_url, 
+                    headers=self.headers, 
+                    json=payload
+                )
+                
+                # Raise for non-2xx responses
+                response.raise_for_status()
+                
+                result = response.json()
+                
+                # Extract content from chat completions format
+                if "choices" in result and len(result["choices"]) > 0:
+                    content = result["choices"][0]["message"]["content"]
+                    return content.strip()
+                
+                # Handle error responses
+                elif "error" in result:
+                    raise Exception(f"HuggingFace API error: {result['error']}")
+                
+                else:
+                    logger.warning(f"Unexpected response format: {result}")
+                    return str(result)
+                    
+            except httpx.HTTPStatusError as e:
+                logger.error(f"HTTP error from HuggingFace: {e.response.status_code} - {e.response.text}")
+                raise
+            except Exception as e:
+                logger.error(f"Error calling HuggingFace API: {e}")
+                raise
 
     def _parse_story_response(self, response: str, selected_genres: List[str]) -> List[SceneAnalysis]:
         """Parse AI response into scene objects"""

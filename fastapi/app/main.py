@@ -48,14 +48,14 @@ async def root():
     return {
         "service": "Audynce AI",
         "status": "running",
-        "model": settings.model_name
+        "model": settings.huggingface_model
     }
 
 @app.get("/health")
 async def health_check():
     return {
         "status": "healthy",
-        "model": settings.model_name,
+        "model": settings.huggingface_model,
         "mongodb": "connected" if cache_service.collection is not None else "disconnected"
     }
 
