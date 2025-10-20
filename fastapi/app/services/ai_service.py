@@ -16,8 +16,16 @@ logger = logging.getLogger(__name__)
 
 class AIService:
     def __init__(self):
-        # Use HuggingFace's official InferenceClient
-        self.client = InferenceClient(token=os.environ.get('HUGGINGFACE_TOKEN'))
+        # Get token from environment
+        token = os.environ.get('HUGGINGFACE_TOKEN')
+        
+        if not token:
+            logger.warning("No HUGGINGFACE_TOKEN found in environment!")
+        else:
+            logger.info(f"HuggingFace token found: {token[:10]}...")
+        
+        # Initialize client with token
+        self.client = InferenceClient(token=token)
 
     async def analyze_prompt(self, prompt: str, selected_genres: List[str], story_threshold: int) -> AIAnalysisResponse:
         """Main analysis method - determines mode and analyzes accordingly"""
@@ -69,26 +77,59 @@ class AIService:
         try:
             logger.info(f"Calling HuggingFace model: {settings.huggingface_model}")
             
-            # Use text_generation with the InferenceClient
-            # This properly handles the serverless API
-            response = self.client.text_generation(
-                prompt=prompt,
-                model=settings.huggingface_model,
-                max_new_tokens=600,
-                temperature=0.7,
-                top_p=0.9,
-                do_sample=True,
-                return_full_text=False
-            )
-            
-            logger.info("HuggingFace API call successful")
-            return response.strip()
+            # Try multiple approaches
+            try:
+                # Approach 1: text_generation (synchronous call)
+                response = self.client.text_generation(
+                    prompt=prompt,
+                    model=settings.huggingface_model,
+                    max_new_tokens=600,
+                    temperature=0.7,
+                    top_p=0.9,
+                    do_sample=True,
+                    return_full_text=False
+                )
+                
+                logger.info("HuggingFace API call successful (text_generation)")
+                return response.strip()
+                
+            except Exception as e1:
+                logger.warning(f"text_generation failed: {e1}, trying chat_completion...")
+                
+                # Approach 2: Try chat_completion format
+                try:
+                    messages = [{"role": "user", "content": prompt}]
+                    response = self.client.chat_completion(
+                        messages=messages,
+                        model=settings.huggingface_model,
+                        max_tokens=600,
+                        temperature=0.7
+                    )
+                    
+                    content = response.choices[0].message.content
+                    logger.info("HuggingFace API call successful (chat_completion)")
+                    return content.strip()
+                    
+                except Exception as e2:
+                    logger.error(f"chat_completion also failed: {e2}")
+                    raise e1  # Raise the original error
                     
         except Exception as e:
-            logger.error(f"Error calling HuggingFace API: {e}")
-            # Check if it's a model loading error (503)
-            if "503" in str(e) or "loading" in str(e).lower():
-                logger.warning("Model is loading, using fallback")
+            error_msg = str(e)
+            logger.error(f"Error calling HuggingFace API: {error_msg}")
+            
+            # Check for specific error types
+            if "404" in error_msg:
+                logger.error(f"Model not found: {settings.huggingface_model}")
+                logger.error("This could mean:")
+                logger.error("1. Model name is incorrect")
+                logger.error("2. Model requires gated access (check HuggingFace)")
+                logger.error("3. Model is not available on serverless API")
+            elif "401" in error_msg or "403" in error_msg:
+                logger.error("Authentication error - check HUGGINGFACE_TOKEN")
+            elif "503" in error_msg or "loading" in error_msg.lower():
+                logger.warning("Model is loading, this is temporary")
+            
             raise
 
     def _parse_story_response(self, response: str, selected_genres: List[str]) -> List[SceneAnalysis]:

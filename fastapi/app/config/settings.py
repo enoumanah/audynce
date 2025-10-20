@@ -5,7 +5,8 @@ from typing import Optional
 
 class Settings(BaseSettings):
     huggingface_token: Optional[str] = None
-    huggingface_model: str = "HuggingFaceH4/zephyr-7b-beta"
+    # Using Qwen 2.5 - reliable, open, works with Inference API
+    huggingface_model: str = "Qwen/Qwen2.5-3B-Instruct"
     mongodb_uri: Optional[str] = None
     mongodb_database: str = "audynce"
     story_mode_threshold: int = 80
@@ -15,6 +16,7 @@ class Settings(BaseSettings):
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
+        # This tells Pydantic to not protect the 'model_' namespace
         "protected_namespaces": ()
     }
 
