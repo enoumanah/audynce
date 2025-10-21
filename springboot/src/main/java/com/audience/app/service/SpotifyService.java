@@ -40,6 +40,10 @@ public class SpotifyService {
     @Value("${app.spotify.top-artists-cache-hours:24}")
     private int topArtistsCacheHours;
 
+    private static final Set<String> VALID_SPOTIFY_GENRES = Set.of(
+            "pop", "rnb", "jazz", "rock", "hip-hop", "dance", "afrobeat", "indie", "electronic", "soul"
+    );
+
     /**
      * Get Spotify access token using Client Credentials flow
      */
@@ -124,14 +128,14 @@ public class SpotifyService {
         Map<String, Object> queryParams = new HashMap<>();
         queryParams.put("limit", request.getLimit());
 
-        // Add seed genres (max 3)
         if (request.getSeedGenres() != null && !request.getSeedGenres().isEmpty()) {
             String genres = request.getSeedGenres().stream()
+                    .filter(VALID_SPOTIFY_GENRES::contains) // ✅ filter invalid
                     .limit(3)
                     .collect(Collectors.joining(","));
             queryParams.put("seed_genres", genres);
         }
-
+        
         // Add seed artists for personalization (max 2)
         if (request.getSeedArtists() != null && !request.getSeedArtists().isEmpty()) {
             String artists = request.getSeedArtists().stream()
