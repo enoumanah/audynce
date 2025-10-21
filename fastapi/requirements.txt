@@ -9,3 +9,4 @@ motor==3.4.0
 pymongo==4.8.0
 python-multipart==0.0.9
 huggingface-hub==0.26.2
+openai>=1.0.0
