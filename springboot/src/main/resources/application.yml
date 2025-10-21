@@ -23,6 +23,9 @@ spring:
         dialect: org.hibernate.dialect.H2Dialect
         format_sql: true
 
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+
   h2:
     console:
       enabled: true

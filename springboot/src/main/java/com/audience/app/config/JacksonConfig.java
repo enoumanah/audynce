@@ -12,12 +12,9 @@ public class JacksonConfig {
     @Bean
     public ObjectMapper objectMapper() {
         ObjectMapper mapper = new ObjectMapper();
-
         mapper.setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
-        
         mapper.registerModule(new JavaTimeModule());
         mapper.findAndRegisterModules();
-
         return mapper;
     }
 }

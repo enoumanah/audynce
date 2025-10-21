@@ -1,6 +1,7 @@
 package com.audience.app.dto.request;
 
 import com.audience.app.entity.MoodType;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.*;
 import lombok.AllArgsConstructor;
@@ -24,7 +25,10 @@ public class PlaylistGenerateRequest {
     @JsonProperty("selectedGenres")
     private List<String> selectedGenres;
 
+    @JsonProperty("overallMood")
+    @JsonAlias("overall_mood")
     private MoodType overallMood;
+
 
     @Min(value = 5, message = "Minimum 5 tracks per scene")
     @Max(value = 10, message = "Maximum 10 tracks per scene")
