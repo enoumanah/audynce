@@ -1,6 +1,7 @@
 package com.audience.app.dto.request;
 
 import com.audience.app.entity.MoodType;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -20,6 +21,7 @@ public class PlaylistGenerateRequest {
     private String prompt;
 
     @Size(min = 1, max = 3, message = "Select 1-3 genres")
+    @JsonProperty("selectedGenres")
     private List<String> selectedGenres;
 
     private MoodType overallMood;
