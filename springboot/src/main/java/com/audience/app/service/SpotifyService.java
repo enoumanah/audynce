@@ -154,7 +154,7 @@ public class SpotifyService {
         // Approximate mood in query (keywords based on MoodType)
         String moodQuery = "";
         if (mood != null) {
-            MoodType moodType = getMoodTypeFromProfile(mood); // Need to add reverse mapping or pass MoodType
+            MoodType moodType = getMoodTypeFromProfile(mood);
             moodQuery = switch (moodType) {
                 case UPBEAT -> " upbeat energetic happy";
                 case MELANCHOLIC -> " sad reflective melancholic";
@@ -170,30 +170,42 @@ public class SpotifyService {
             };
         }
 
+        String yearRange = " year:2010-2025"; // Add to get recent tracks
+
         // Fallback to genres-only if no artists
         if (allArtists.isEmpty()) {
-            String genreQuery = seedGenres.stream().map(g -> "genre:\"" + g + "\"").collect(Collectors.joining(" ")) + moodQuery;
+            String genreQuery = seedGenres.stream().map(g -> "genre:\"" + g + "\"").collect(Collectors.joining(" ")) + moodQuery + yearRange;
+            log.info("Searching with query: {}", genreQuery);
             candidateTracks.addAll(searchTracks(genreQuery, limit * 2, accessToken)); // Double to allow variety
         } else {
             // Search Spotify for tracks from these artists + genres + mood
             for (String artist : allArtists) {
-                String query = "artist:\"" + artist + "\"" + moodQuery;
+                String query = "artist:\"" + artist + "\"";
                 if (!seedGenres.isEmpty()) {
                     query += " " + seedGenres.stream().map(g -> "genre:\"" + g + "\"").collect(Collectors.joining(" "));
                 }
+                query += moodQuery + yearRange;
+                log.info("Searching with query: {}", query);
                 List<Map<String, Object>> tracks = searchTracks(query, Math.max(5, limit / allArtists.size()), accessToken);
                 candidateTracks.addAll(tracks);
             }
         }
 
-        // If no tracks found, fallback to pure genre search
+        // If no tracks, retry without moodQuery
+        if (candidateTracks.isEmpty()) {
+            log.warn("No tracks with mood; retrying without mood keywords");
+            candidateTracks.addAll(getRecommendationsWithoutMood(request, accessToken, seedArtists, seedGenres, limit, yearRange));
+        }
+
+        // If still no tracks found, fallback to pure genre search without mood
         if (candidateTracks.isEmpty() && !seedGenres.isEmpty()) {
-            String fallbackQuery = seedGenres.stream().map(g -> "genre:\"" + g + "\"").collect(Collectors.joining(" ")) + moodQuery;
+            String fallbackQuery = seedGenres.stream().map(g -> "genre:\"" + g + "\"").collect(Collectors.joining(" ")) + yearRange;
+            log.info("Fallback search with query: {}", fallbackQuery);
             candidateTracks.addAll(searchTracks(fallbackQuery, limit * 2, accessToken));
         }
 
         if (candidateTracks.isEmpty()) {
-            log.warn("No tracks found after search");
+            log.warn("No tracks found after all searches");
             return Collections.emptyList();
         }
 
@@ -205,7 +217,43 @@ public class SpotifyService {
         return candidateTracks;
     }
 
-    // Add helper to get MoodType (assume you inject moodProfiles map)
+    // Helper for retry without mood
+    private List<Map<String, Object>> getRecommendationsWithoutMood(
+            SpotifyRecommendationRequest request,
+            String accessToken,
+            List<String> seedArtists,
+            List<String> seedGenres,
+            int limit,
+            String yearRange) {
+
+        List<Map<String, Object>> candidates = new ArrayList<>();
+        List<String> allArtists = new ArrayList<>(seedArtists);
+        if (!seedArtists.isEmpty()) {
+            for (String seedArtist : seedArtists) {
+                List<String> similar = getSimilarArtists(seedArtist, 5);
+                allArtists.addAll(similar);
+            }
+        }
+
+        if (allArtists.isEmpty()) {
+            String genreQuery = seedGenres.stream().map(g -> "genre:\"" + g + "\"").collect(Collectors.joining(" ")) + yearRange;
+            log.info("Retry search with query: {}", genreQuery);
+            candidates.addAll(searchTracks(genreQuery, limit * 2, accessToken));
+        } else {
+            for (String artist : allArtists) {
+                String query = "artist:\"" + artist + "\"";
+                if (!seedGenres.isEmpty()) {
+                    query += " " + seedGenres.stream().map(g -> "genre:\"" + g + "\"").collect(Collectors.joining(" "));
+                }
+                query += yearRange;
+                log.info("Retry search with query: {}", query);
+                candidates.addAll(searchTracks(query, Math.max(5, limit / allArtists.size()), accessToken));
+            }
+        }
+        return candidates;
+    }
+
+    // MoodType helper
     private MoodType getMoodTypeFromProfile(MoodProfile mood) {
         for (Map.Entry<MoodType, MoodProfile> entry : moodProfiles.entrySet()) {
             if (entry.getValue().equals(mood)) {
@@ -252,7 +300,7 @@ public class SpotifyService {
             return Collections.emptyList();
         }
     }
-    
+
     // ---- keep createSpotifyPlaylist simple and separate from recommendations ----
     public String createSpotifyPlaylist(User user, String title, String description,
                                         List<String> trackUris, boolean isPublic) {
