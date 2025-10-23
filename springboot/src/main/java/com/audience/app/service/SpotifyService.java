@@ -37,11 +37,14 @@ public class SpotifyService {
     @Value("${app.spotify.client-secret}")
     private String clientSecret;
 
+    @Value("${app.lastfm.api-key}")
+    private String lastFmApiKey;
+
     @Value("${app.spotify.top-artists-cache-hours:24}")
     private int topArtistsCacheHours;
 
     private static final Set<String> VALID_SPOTIFY_GENRES = Set.of(
-            "pop", "rnb", "jazz", "rock", "hip-hop", "dance", "afrobeat", "indie", "electronic", "soul"
+            "pop", "r-n-b", "jazz", "rock", "hip-hop", "dance", "afrobeat", "indie", "electronic", "soul"
     );
 
     /**
@@ -66,7 +69,7 @@ public class SpotifyService {
     }
 
     /**
-     * Get user's top artists for personalization
+     * Get user's top artists for personalization (returns names instead of IDs for Last.fm compatibility)
      */
     public List<String> getUserTopArtists(User user, int limit) {
         // Check cache first
@@ -101,13 +104,13 @@ public class SpotifyService {
             }
 
             List<Map<String, Object>> items = (List<Map<String, Object>>) response.get("items");
-            List<String> artistIds = items.stream()
-                    .map(item -> (String) item.get("id"))
+            List<String> artistNames = items.stream()
+                    .map(item -> (String) item.get("name"))
                     .limit(limit)
                     .collect(Collectors.toList());
 
-            log.info("Found {} top artists for user: {}", artistIds.size(), user.getSpotifyId());
-            return artistIds;
+            log.info("Found {} top artists for user: {}", artistNames.size(), user.getSpotifyId());
+            return artistNames;
 
         } catch (Exception e) {
             log.error("Error fetching top artists for user: {}", user.getSpotifyId(), e);
@@ -116,136 +119,201 @@ public class SpotifyService {
     }
 
     /**
-     * Get track recommendations based on mood, genres, and user personalization
+     * Updated: Get track recommendations using Last.fm similarity + Spotify search + audio features filtering
      */
-
-
     public List<Map<String, Object>> getRecommendations(
             SpotifyRecommendationRequest request,
             String accessToken) {
 
-        WebClient webClient = webClientBuilder.baseUrl(spotifyApiUrl).build();
+        List<String> seedArtists = request.getSeedArtists() != null ? request.getSeedArtists() : Collections.emptyList();
+        List<String> seedGenres = request.getSeedGenres() != null ? request.getSeedGenres().stream()
+                .map(g -> g.trim().toLowerCase())
+                .filter(VALID_SPOTIFY_GENRES::contains)
+                .limit(3)
+                .collect(Collectors.toList()) : Collections.emptyList();
         MoodProfile mood = request.getMoodProfile();
+        int limit = request.getLimit();
 
-        Map<String, Object> queryParams = new HashMap<>();
-        queryParams.put("limit", request.getLimit());
+        List<Map<String, Object>> candidateTracks = new ArrayList<>();
 
-        // Normalize + filter genres
-        if (request.getSeedGenres() != null && !request.getSeedGenres().isEmpty()) {
-            String genres = request.getSeedGenres().stream()
-                    .map(g -> g == null ? "" : g.trim().toLowerCase())
-                    .filter(g -> !g.isEmpty())
-                    .filter(VALID_SPOTIFY_GENRES::contains)
-                    .limit(3)
-                    .collect(Collectors.joining(","));
-            if (!genres.isBlank()) {
-                queryParams.put("seed_genres", genres);
-            }
-        }
-
-        // Add seed artists for personalization (max 2)
-        if (request.getSeedArtists() != null && !request.getSeedArtists().isEmpty()) {
-            String artists = request.getSeedArtists().stream()
-                    .filter(Objects::nonNull)
-                    .map(String::trim)
-                    .filter(s -> !s.isEmpty())
-                    .limit(2)
-                    .collect(Collectors.joining(","));
-            if (!artists.isBlank()) {
-                queryParams.put("seed_artists", artists);
-            }
-        }
-
-        // Add mood profile attributes
-        if (mood != null) {
-            Optional.ofNullable(mood.getTargetValence()).ifPresent(v -> queryParams.put("target_valence", v));
-            Optional.ofNullable(mood.getTargetEnergy()).ifPresent(v -> queryParams.put("target_energy", v));
-            Optional.ofNullable(mood.getTargetDanceability()).ifPresent(v -> queryParams.put("target_danceability", v));
-            Optional.ofNullable(mood.getTargetTempo()).ifPresent(v -> queryParams.put("target_tempo", v));
-            Optional.ofNullable(mood.getTargetAcousticness()).ifPresent(v -> queryParams.put("target_acousticness", v));
-        }
-
-        log.info("Requesting recommendations with params: {}", queryParams);
-
-        // Guard: ensure we have at least one seed
-        boolean hasSeedArtists = queryParams.containsKey("seed_artists") && !((String) queryParams.get("seed_artists")).isBlank();
-        boolean hasSeedGenres = queryParams.containsKey("seed_genres") && !((String) queryParams.get("seed_genres")).isBlank();
-
-        if (!hasSeedArtists && !hasSeedGenres) {
-            log.warn("No valid seeds provided — skipping Spotify recommendations call");
+        // If no seeds, return empty
+        if (seedArtists.isEmpty() && seedGenres.isEmpty()) {
+            log.warn("No valid seeds provided — skipping recommendations");
             return Collections.emptyList();
         }
+
+        // Use Last.fm for similar artists if seeds provided
+        List<String> allArtists = new ArrayList<>(seedArtists);
+        if (!seedArtists.isEmpty()) {
+            for (String seedArtist : seedArtists) {
+                List<String> similar = getSimilarArtists(seedArtist, 5); // Get 5 similar per seed
+                allArtists.addAll(similar);
+            }
+        }
+
+        // Fallback to genres-only if no artists
+        if (allArtists.isEmpty()) {
+            String genreQuery = seedGenres.stream().map(g -> "genre:\"" + g + "\"").collect(Collectors.joining(" "));
+            candidateTracks.addAll(searchTracks(genreQuery, limit * 2, accessToken)); // Double to allow filtering
+        } else {
+            // Search Spotify for tracks from these artists + genres
+            for (String artist : allArtists) {
+                String query = "artist:\"" + artist + "\"";
+                if (!seedGenres.isEmpty()) {
+                    query += " " + seedGenres.stream().map(g -> "genre:\"" + g + "\"").collect(Collectors.joining(" "));
+                }
+                List<Map<String, Object>> tracks = searchTracks(query, Math.max(5, limit / allArtists.size()), accessToken);
+                candidateTracks.addAll(tracks);
+            }
+        }
+
+        // If no tracks found, fallback to pure genre search
+        if (candidateTracks.isEmpty() && !seedGenres.isEmpty()) {
+            String fallbackQuery = seedGenres.stream().map(g -> "genre:\"" + g + "\"").collect(Collectors.joining(" "));
+            candidateTracks.addAll(searchTracks(fallbackQuery, limit * 2, accessToken));
+        }
+
+        if (candidateTracks.isEmpty()) {
+            log.warn("No tracks found after search");
+            return Collections.emptyList();
+        }
+
+        // Fetch audio features for candidates
+        List<String> trackIds = candidateTracks.stream()
+                .map(t -> (String) t.get("id"))
+                .collect(Collectors.toList());
+        List<Map<String, Object>> features = getAudioFeatures(trackIds, accessToken);
+
+        // Filter/sort by mood proximity if mood provided
+        if (mood != null) {
+            List<Map.Entry<Map<String, Object>, Double>> scoredTracks = new ArrayList<>();
+            for (int i = 0; i < candidateTracks.size(); i++) {
+                Map<String, Object> track = candidateTracks.get(i);
+                Map<String, Object> feature = features.get(i);
+                if (feature != null) {
+                    double distance = calculateMoodDistance(mood, feature);
+                    scoredTracks.add(new AbstractMap.SimpleEntry<>(track, distance));
+                }
+            }
+            // Sort by ascending distance (closest first)
+            scoredTracks.sort(Comparator.comparing(Map.Entry::getValue));
+            candidateTracks = scoredTracks.stream()
+                    .map(Map.Entry::getKey)
+                    .limit(limit)
+                    .collect(Collectors.toList());
+        } else {
+            // No mood: take random or first N
+            Collections.shuffle(candidateTracks);
+            candidateTracks = candidateTracks.subList(0, Math.min(limit, candidateTracks.size()));
+        }
+
+        log.info("Returned {} filtered track recommendations", candidateTracks.size());
+        return candidateTracks;
+    }
+
+    /**
+     * Get similar artists from Last.fm
+     */
+    public List<String> getSimilarArtists(String seedArtist, int limit) {
+        WebClient webClient = webClientBuilder.baseUrl("https://ws.audioscrobbler.com/2.0/").build();
 
         try {
             Map<String, Object> response = webClient.get()
-                    .uri(uriBuilder -> {
-                        var builder = uriBuilder.path("/recommendations");
-                        queryParams.forEach(builder::queryParam);
-                        return builder.build();
-                    })
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                    .uri(uriBuilder -> uriBuilder
+                            .queryParam("method", "artist.getSimilar")
+                            .queryParam("artist", seedArtist)
+                            .queryParam("api_key", lastFmApiKey)
+                            .queryParam("format", "json")
+                            .queryParam("limit", limit)
+                            .build())
                     .retrieve()
                     .bodyToMono(Map.class)
                     .block();
 
-            if (response != null && response.containsKey("tracks")) {
-                List<Map<String, Object>> tracks = (List<Map<String, Object>>) response.get("tracks");
-                log.info("Received {} track recommendations", tracks.size());
-                return tracks;
+            if (response == null || !response.containsKey("similarartists")) {
+                return Collections.emptyList();
             }
 
-        } catch (WebClientResponseException e) {
-            String body = e.getResponseBodyAsString();
-            log.error("Spotify API returned {} - body: {}", e.getStatusCode(), body);
+            Map<String, Object> similar = (Map<String, Object>) response.get("similarartists");
+            List<Map<String, Object>> artists = (List<Map<String, Object>>) similar.get("artist");
 
-            if (e.getStatusCode().value() == 404) {
-                // Retry removing seed_artists (artists often cause zero results)
-                if (hasSeedArtists && hasSeedGenres) {
-                    log.warn("Spotify returned 404 for params: {} — retrying with genres only", queryParams);
-                    return retryWithGenresOnly(webClient, queryParams, accessToken);
-                }
-            }
+            // Filter by match >= 0.5 and extract names
+            return artists.stream()
+                    .filter(a -> Double.parseDouble((String) a.get("match")) >= 0.5)
+                    .map(a -> (String) a.get("name"))
+                    .collect(Collectors.toList());
+
         } catch (Exception e) {
-            log.error("Error getting recommendations", e);
+            log.error("Error fetching similar artists from Last.fm for: {}", seedArtist, e);
+            return Collections.emptyList();
         }
-
-        return Collections.emptyList();
     }
 
-    private List<Map<String, Object>> retryWithGenresOnly(WebClient webClient, Map<String, Object> originalQueryParams, String accessToken) {
-        // shallow copy - don't mutate the caller's map
-        Map<String, Object> qp = new HashMap<>(originalQueryParams);
-        qp.remove("seed_artists");
-
-        // guard: we must still have at least seed_genres
-        if (!qp.containsKey("seed_genres") || ((String) qp.get("seed_genres")).isBlank()) {
-            log.warn("No seed_genres available for fallback retry");
+    /**
+     * Fetch audio features for multiple tracks
+     */
+    private List<Map<String, Object>> getAudioFeatures(List<String> trackIds, String accessToken) {
+        if (trackIds.isEmpty()) {
             return Collections.emptyList();
         }
 
+        WebClient webClient = webClientBuilder.baseUrl(spotifyApiUrl).build();
+        String idsParam = String.join(",", trackIds);
+
         try {
-            Map<String, Object> fallbackResponse = webClient.get()
-                    .uri(uriBuilder -> {
-                        var builder = uriBuilder.path("/recommendations");
-                        qp.forEach(builder::queryParam);
-                        return builder.build();
-                    })
+            Map<String, Object> response = webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/audio-features")
+                            .queryParam("ids", idsParam)
+                            .build())
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                     .retrieve()
                     .bodyToMono(Map.class)
                     .block();
 
-            if (fallbackResponse != null && fallbackResponse.containsKey("tracks")) {
-                List<Map<String, Object>> tracks = (List<Map<String, Object>>) fallbackResponse.get("tracks");
-                log.info("Fallback (genres-only) returned {} tracks", tracks.size());
-                return tracks;
+            if (response != null && response.containsKey("audio_features")) {
+                return (List<Map<String, Object>>) response.get("audio_features");
             }
-        } catch (WebClientResponseException e) {
-            log.error("Fallback Spotify API error: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
-        } catch (Exception retryEx) {
-            log.error("Fallback recommendation also failed", retryEx);
+        } catch (Exception e) {
+            log.error("Error fetching audio features", e);
         }
-        return Collections.emptyList();
+        return Collections.nCopies(trackIds.size(), null); // Align with track list
+    }
+
+    /**
+     * Calculate Euclidean distance to mood targets
+     */
+    private double calculateMoodDistance(MoodProfile mood, Map<String, Object> feature) {
+        double sumSq = 0.0;
+        int count = 0;
+
+        if (mood.getTargetValence() != null) {
+            double val = (Double) feature.getOrDefault("valence", 0.5);
+            sumSq += Math.pow(val - mood.getTargetValence(), 2);
+            count++;
+        }
+        if (mood.getTargetEnergy() != null) {
+            double val = (Double) feature.getOrDefault("energy", 0.5);
+            sumSq += Math.pow(val - mood.getTargetEnergy(), 2);
+            count++;
+        }
+        if (mood.getTargetDanceability() != null) {
+            double val = (Double) feature.getOrDefault("danceability", 0.5);
+            sumSq += Math.pow(val - mood.getTargetDanceability(), 2);
+            count++;
+        }
+        if (mood.getTargetTempo() != null) {
+            double val = (Double) feature.getOrDefault("tempo", 120.0);
+            sumSq += Math.pow((val - mood.getTargetTempo()) / 100.0, 2); // Normalize tempo
+            count++;
+        }
+        if (mood.getTargetAcousticness() != null) {
+            double val = (Double) feature.getOrDefault("acousticness", 0.5);
+            sumSq += Math.pow(val - mood.getTargetAcousticness(), 2);
+            count++;
+        }
+
+        return count > 0 ? Math.sqrt(sumSq / count) : Double.MAX_VALUE;
     }
 
     // ---- keep createSpotifyPlaylist simple and separate from recommendations ----

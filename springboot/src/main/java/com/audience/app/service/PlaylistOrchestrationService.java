@@ -187,15 +187,15 @@ public class PlaylistOrchestrationService {
                 ? sceneAnalysis.getSuggestedGenres()
                 : selectedGenres;
 
-        // Build recommendation request
+        // Build recommendation request (now used for Last.fm + search)
         SpotifyRecommendationRequest recommendationRequest = SpotifyRecommendationRequest.builder()
-                .seedGenres(genres != null ? genres.stream().limit(3).collect(Collectors.toList()) : List.of())
-                .seedArtists(topArtists.stream().limit(2).collect(Collectors.toList()))
+                .seedGenres(genres != null ? genres : List.of())
+                .seedArtists(topArtists)
                 .moodProfile(moodProfile)
                 .limit(limit)
                 .build();
 
-        // Get recommendations from Spotify
+        // Get recommendations using new flow
         List<Map<String, Object>> spotifyTracks = spotifyService.getRecommendations(
                 recommendationRequest,
                 accessToken
@@ -230,8 +230,8 @@ public class PlaylistOrchestrationService {
                 : selectedGenres;
 
         SpotifyRecommendationRequest recommendationRequest = SpotifyRecommendationRequest.builder()
-                .seedGenres(genres.stream().limit(3).collect(Collectors.toList()))
-                .seedArtists(topArtists.stream().limit(2).collect(Collectors.toList()))
+                .seedGenres(genres)
+                .seedArtists(topArtists)
                 .moodProfile(moodProfile)
                 .limit(limit)
                 .build();

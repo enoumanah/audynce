@@ -76,6 +76,10 @@ app:
     client-secret: ${SPOTIFY_CLIENT_SECRET}
     top-artists-cache-hours: 24
 
+  last.fm:
+    api-key: ${LASTFM_API_KEY}
+    shared-secret: ${LASTFM_SHARED_SECRET}
+
   ai:
     model: meta-llama/Llama-3.3-70B-Instruct
     huggingface-token: ${HUGGINGFACE_TOKEN}
