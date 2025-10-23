@@ -87,7 +87,7 @@ app:
     max-scenes: 6
 
   available:
-    genres: hip-hop,rnb,pop,afrobeats,dance,indie,rock,electronic,jazz,soul
+    genres: hip-hop,r-n-b,pop,afrobeats,dance,indie,rock,electronic,jazz,soul
 
   playlist:
     min-tracks-per-scene: 3
