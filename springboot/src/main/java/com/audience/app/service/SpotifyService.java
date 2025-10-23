@@ -151,14 +151,33 @@ public class SpotifyService {
             }
         }
 
+        // Approximate mood in query (keywords based on MoodType)
+        String moodQuery = "";
+        if (mood != null) {
+            MoodType moodType = getMoodTypeFromProfile(mood); // Need to add reverse mapping or pass MoodType
+            moodQuery = switch (moodType) {
+                case UPBEAT -> " upbeat energetic happy";
+                case MELANCHOLIC -> " sad reflective melancholic";
+                case ROMANTIC -> " romantic warm tender";
+                case ADVENTUROUS -> " adventurous bold exciting";
+                case PEACEFUL -> " peaceful calm serene";
+                case ENERGETIC -> " energetic high-intensity";
+                case INTENSE -> " intense dark powerful";
+                case NOSTALGIC -> " nostalgic wistful reminiscent";
+                case DREAMY -> " dreamy ethereal floating";
+                case CHILL -> " chill relaxed laid-back";
+                default -> "";
+            };
+        }
+
         // Fallback to genres-only if no artists
         if (allArtists.isEmpty()) {
-            String genreQuery = seedGenres.stream().map(g -> "genre:\"" + g + "\"").collect(Collectors.joining(" "));
-            candidateTracks.addAll(searchTracks(genreQuery, limit * 2, accessToken)); // Double to allow filtering
+            String genreQuery = seedGenres.stream().map(g -> "genre:\"" + g + "\"").collect(Collectors.joining(" ")) + moodQuery;
+            candidateTracks.addAll(searchTracks(genreQuery, limit * 2, accessToken)); // Double to allow variety
         } else {
-            // Search Spotify for tracks from these artists + genres
+            // Search Spotify for tracks from these artists + genres + mood
             for (String artist : allArtists) {
-                String query = "artist:\"" + artist + "\"";
+                String query = "artist:\"" + artist + "\"" + moodQuery;
                 if (!seedGenres.isEmpty()) {
                     query += " " + seedGenres.stream().map(g -> "genre:\"" + g + "\"").collect(Collectors.joining(" "));
                 }
@@ -169,7 +188,7 @@ public class SpotifyService {
 
         // If no tracks found, fallback to pure genre search
         if (candidateTracks.isEmpty() && !seedGenres.isEmpty()) {
-            String fallbackQuery = seedGenres.stream().map(g -> "genre:\"" + g + "\"").collect(Collectors.joining(" "));
+            String fallbackQuery = seedGenres.stream().map(g -> "genre:\"" + g + "\"").collect(Collectors.joining(" ")) + moodQuery;
             candidateTracks.addAll(searchTracks(fallbackQuery, limit * 2, accessToken));
         }
 
@@ -178,37 +197,22 @@ public class SpotifyService {
             return Collections.emptyList();
         }
 
-        // Fetch audio features for candidates
-        List<String> trackIds = candidateTracks.stream()
-                .map(t -> (String) t.get("id"))
-                .collect(Collectors.toList());
-        List<Map<String, Object>> features = getAudioFeatures(trackIds, accessToken);
+        // Shuffle and limit
+        Collections.shuffle(candidateTracks);
+        candidateTracks = candidateTracks.subList(0, Math.min(limit, candidateTracks.size()));
 
-        // Filter/sort by mood proximity if mood provided
-        if (mood != null) {
-            List<Map.Entry<Map<String, Object>, Double>> scoredTracks = new ArrayList<>();
-            for (int i = 0; i < candidateTracks.size(); i++) {
-                Map<String, Object> track = candidateTracks.get(i);
-                Map<String, Object> feature = features.get(i);
-                if (feature != null) {
-                    double distance = calculateMoodDistance(mood, feature);
-                    scoredTracks.add(new AbstractMap.SimpleEntry<>(track, distance));
-                }
-            }
-            // Sort by ascending distance (closest first)
-            scoredTracks.sort(Comparator.comparing(Map.Entry::getValue));
-            candidateTracks = scoredTracks.stream()
-                    .map(Map.Entry::getKey)
-                    .limit(limit)
-                    .collect(Collectors.toList());
-        } else {
-            // No mood: take random or first N
-            Collections.shuffle(candidateTracks);
-            candidateTracks = candidateTracks.subList(0, Math.min(limit, candidateTracks.size()));
-        }
-
-        log.info("Returned {} filtered track recommendations", candidateTracks.size());
+        log.info("Returned {} track recommendations", candidateTracks.size());
         return candidateTracks;
+    }
+
+    // Add helper to get MoodType (assume you inject moodProfiles map)
+    private MoodType getMoodTypeFromProfile(MoodProfile mood) {
+        for (Map.Entry<MoodType, MoodProfile> entry : moodProfiles.entrySet()) {
+            if (entry.getValue().equals(mood)) {
+                return entry.getKey();
+            }
+        }
+        return MoodType.BALANCED;
     }
 
     /**
@@ -248,74 +252,7 @@ public class SpotifyService {
             return Collections.emptyList();
         }
     }
-
-    /**
-     * Fetch audio features for multiple tracks
-     */
-    private List<Map<String, Object>> getAudioFeatures(List<String> trackIds, String accessToken) {
-        if (trackIds.isEmpty()) {
-            return Collections.emptyList();
-        }
-
-        WebClient webClient = webClientBuilder.baseUrl(spotifyApiUrl).build();
-        String idsParam = String.join(",", trackIds);
-
-        try {
-            Map<String, Object> response = webClient.get()
-                    .uri(uriBuilder -> uriBuilder
-                            .path("/audio-features")
-                            .queryParam("ids", idsParam)
-                            .build())
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
-                    .retrieve()
-                    .bodyToMono(Map.class)
-                    .block();
-
-            if (response != null && response.containsKey("audio_features")) {
-                return (List<Map<String, Object>>) response.get("audio_features");
-            }
-        } catch (Exception e) {
-            log.error("Error fetching audio features", e);
-        }
-        return Collections.nCopies(trackIds.size(), null); // Align with track list
-    }
-
-    /**
-     * Calculate Euclidean distance to mood targets
-     */
-    private double calculateMoodDistance(MoodProfile mood, Map<String, Object> feature) {
-        double sumSq = 0.0;
-        int count = 0;
-
-        if (mood.getTargetValence() != null) {
-            double val = (Double) feature.getOrDefault("valence", 0.5);
-            sumSq += Math.pow(val - mood.getTargetValence(), 2);
-            count++;
-        }
-        if (mood.getTargetEnergy() != null) {
-            double val = (Double) feature.getOrDefault("energy", 0.5);
-            sumSq += Math.pow(val - mood.getTargetEnergy(), 2);
-            count++;
-        }
-        if (mood.getTargetDanceability() != null) {
-            double val = (Double) feature.getOrDefault("danceability", 0.5);
-            sumSq += Math.pow(val - mood.getTargetDanceability(), 2);
-            count++;
-        }
-        if (mood.getTargetTempo() != null) {
-            double val = (Double) feature.getOrDefault("tempo", 120.0);
-            sumSq += Math.pow((val - mood.getTargetTempo()) / 100.0, 2); // Normalize tempo
-            count++;
-        }
-        if (mood.getTargetAcousticness() != null) {
-            double val = (Double) feature.getOrDefault("acousticness", 0.5);
-            sumSq += Math.pow(val - mood.getTargetAcousticness(), 2);
-            count++;
-        }
-
-        return count > 0 ? Math.sqrt(sumSq / count) : Double.MAX_VALUE;
-    }
-
+    
     // ---- keep createSpotifyPlaylist simple and separate from recommendations ----
     public String createSpotifyPlaylist(User user, String title, String description,
                                         List<String> trackUris, boolean isPublic) {
