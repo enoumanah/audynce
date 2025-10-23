@@ -109,7 +109,7 @@ logging:
   level:
     com.audience: DEBUG
     org.hibernate.SQL: DEBUG
-    org.springframework.security: INFO
+    org.springframework.security: DEBUG
     org.springframework.web: DEBUG
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} %-5level %logger{36} - %msg%n"
@@ -122,6 +122,7 @@ springdoc:
     path: /swagger-ui.html
     operationsSorter: method
 
+---
 ---
 # ===============================================================
 # PRODUCTION PROFILE (optimized for Supabase + Render)
@@ -186,6 +187,10 @@ app:
 
   ai:
     story-mode-threshold: 80
+
+  lastfm:  # <--- ADD THIS SECTION HERE
+    api-key: ${LASTFM_API_KEY}
+    shared-secret: ${LASTFM_SHARED_SECRET}  # If used; optional for your code
 
 audiance:
   security:
