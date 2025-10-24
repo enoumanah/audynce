@@ -15,9 +15,12 @@ import com.audience.app.repository.SceneRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.reactive.function.client.WebClient;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -309,21 +312,54 @@ public class PlaylistOrchestrationService {
                     .map(track -> "spotify:track:" + track.getSpotifyId())
                     .collect(Collectors.toList());
 
+            log.info("Attempting Spotify export: {} tracks for user {}", trackUris.size(), user.getSpotifyId());
+
+            if (trackUris.isEmpty()) {
+                log.warn("No tracks to add—skipping Spotify playlist creation");
+                return;
+            }
+
+            // Validate token first (optional: call /me)
+            if (!isValidAccessToken(user.getAccessToken())) {
+                log.error("Invalid/expired access token—skipping Spotify export");
+                return;
+            }
+
             String spotifyPlaylistId = spotifyService.createSpotifyPlaylist(
                     user,
                     playlist.getTitle(),
                     playlist.getDescription(),
                     trackUris,
-                    playlist.getIsPublic()
+                    playlist.getIsPublic()  // Ensure this matches input true
             );
 
             if (spotifyPlaylistId != null) {
                 playlist.setSpotifyPlaylistId(spotifyPlaylistId);
                 log.info("Created Spotify playlist: {}", spotifyPlaylistId);
+            } else {
+                log.error("Spotify creation failed—check service logs");
             }
 
         } catch (Exception e) {
             log.error("Failed to create Spotify playlist", e);
+        }
+    }
+
+    // New helper: Quick token validation
+    private boolean isValidAccessToken(String token) {
+        if (token == null || token.isEmpty()) return false;
+        WebClient webClient = WebClient.builder().baseUrl("https://api.spotify.com/v1").build();
+        try {
+            webClient.get()
+                    .uri("/me")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                    .retrieve()
+                    .bodyToMono(Void.class)
+                    .block(Duration.ofSeconds(5));  // Timeout
+            return true;
+        } catch (Exception e) {
+            log.warn("Access token invalid: {}", e.getMessage());
+            return false;
         }
     }
 

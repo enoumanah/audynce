@@ -265,6 +265,8 @@ public class SpotifyService {
                                         List<String> trackUris, boolean isPublic) {
         WebClient webClient = webClientBuilder.baseUrl(spotifyApiUrl).build();
 
+        log.info("Creating Spotify playlist for {}: title='{}', public={}, {} tracks", user.getSpotifyId(), title, isPublic, trackUris.size());
+
         try {
             Map<String, Object> createRequest = Map.of(
                     "name", title,
@@ -272,16 +274,21 @@ public class SpotifyService {
                     "public", isPublic
             );
 
+            log.debug("POST request body: {}", createRequest);
+
             Map<String, Object> playlistResponse = webClient.post()
                     .uri("/users/" + user.getSpotifyId() + "/playlists")
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + user.getAccessToken())
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                     .bodyValue(createRequest)
                     .retrieve()
                     .bodyToMono(Map.class)
                     .block();
 
+            log.debug("Spotify create response: {}", playlistResponse);
+
             if (playlistResponse == null || !playlistResponse.containsKey("id")) {
-                log.error("Failed to create Spotify playlist");
+                log.error("Failed to create Spotify playlist - no ID in response: {}", playlistResponse);
                 return null;
             }
 
@@ -289,25 +296,32 @@ public class SpotifyService {
             log.info("Created Spotify playlist: {}", playlistId);
 
             if (!trackUris.isEmpty()) {
+                log.debug("Adding tracks to playlist {}", playlistId);
                 Map<String, Object> addTracksRequest = Map.of("uris", trackUris);
 
-                webClient.post()
+                Map<String, Object> addResponse = webClient.post()
                         .uri("/playlists/" + playlistId + "/tracks")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + user.getAccessToken())
+                        .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                         .bodyValue(addTracksRequest)
                         .retrieve()
                         .bodyToMono(Map.class)
                         .block();
 
-                log.info("Added {} tracks to playlist: {}", trackUris.size(), playlistId);
+                log.debug("Spotify add tracks response: {}", addResponse);
+                if (addResponse != null && addResponse.containsKey("snapshot_id")) {
+                    log.info("Added {} tracks to playlist: {}", trackUris.size(), playlistId);
+                } else {
+                    log.error("Failed to add tracks to playlist {}: {}", playlistId, addResponse);
+                }
             }
 
             return playlistId;
 
         } catch (WebClientResponseException e) {
-            log.error("Spotify API error while creating playlist: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
+            log.error("Spotify API error while creating/adding to playlist: {} - Body: {}", e.getStatusCode(), e.getResponseBodyAsString());
         } catch (Exception e) {
-            log.error("Error creating Spotify playlist", e);
+            log.error("Unexpected error creating Spotify playlist", e);
         }
         return null;
     }
