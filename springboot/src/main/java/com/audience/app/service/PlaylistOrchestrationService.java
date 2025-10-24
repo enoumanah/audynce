@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.Map;
@@ -187,12 +188,16 @@ public class PlaylistOrchestrationService {
                 ? sceneAnalysis.getSuggestedGenres()
                 : selectedGenres;
 
+        // Extract prompt keywords (using scene description as proxy for prompt context)
+        String promptKeywords = extractKeywordsFromPrompt(sceneAnalysis.getDescription());
+
         // Build recommendation request (now used for Last.fm + search)
         SpotifyRecommendationRequest recommendationRequest = SpotifyRecommendationRequest.builder()
                 .seedGenres(genres != null ? genres : List.of())
                 .seedArtists(topArtists)
                 .moodProfile(moodProfile)
                 .limit(limit)
+                .promptKeywords(promptKeywords)
                 .build();
 
         // Get recommendations using new flow
@@ -229,11 +234,15 @@ public class PlaylistOrchestrationService {
                 ? directAnalysis.getExtractedGenres()
                 : selectedGenres;
 
+        // Extract prompt keywords from the original prompt or theme
+        String promptKeywords = extractKeywordsFromPrompt(directAnalysis.getTheme());
+
         SpotifyRecommendationRequest recommendationRequest = SpotifyRecommendationRequest.builder()
                 .seedGenres(genres)
                 .seedArtists(topArtists)
                 .moodProfile(moodProfile)
                 .limit(limit)
+                .promptKeywords(promptKeywords)
                 .build();
 
         List<Map<String, Object>> spotifyTracks = spotifyService.getRecommendations(
@@ -251,6 +260,19 @@ public class PlaylistOrchestrationService {
         log.info("Generated {} tracks for direct mode", tracks.size());
 
         return tracks;
+    }
+
+    /**
+     * New helper: Extract keywords from prompt or theme
+     */
+    private String extractKeywordsFromPrompt(String text) {
+        // Simple: split, filter common words, join
+        String[] words = text.toLowerCase().split("\\s+");
+        List<String> keywords = Arrays.stream(words)
+                .filter(w -> !w.matches("a|an|the|with|in|to|and|or|for|i|my")) // Stopwords
+                .limit(5)
+                .collect(Collectors.toList());
+        return String.join(" ", keywords);
     }
 
     /**

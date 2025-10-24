@@ -16,4 +16,5 @@ public class SpotifyRecommendationRequest {
     private List<String> seedArtists;
     private MoodProfile moodProfile;
     private Integer limit;
+    private String promptKeywords;  // New field for prompt-derived keywords
 }

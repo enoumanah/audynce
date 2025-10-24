@@ -148,7 +148,7 @@ spring:
   jpa:
     show-sql: false
     hibernate:
-      ddl-auto: create            # Keeps existing data; safe schema updates
+      ddl-auto: update            # Keeps existing data; safe schema updates
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
