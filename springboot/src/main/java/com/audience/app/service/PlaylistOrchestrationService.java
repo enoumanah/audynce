@@ -128,7 +128,7 @@ public class PlaylistOrchestrationService {
             List<Track> tracks = getTracksForScene(
                     scene,
                     sceneAnalysis,
-                    request.getSelectedGenres(),
+                    request, // <--- MODIFICATION: Pass the whole request
                     topArtists,
                     tracksPerScene,
                     accessToken
@@ -165,7 +165,7 @@ public class PlaylistOrchestrationService {
         List<Track> tracks = getTracksForDirectMode(
                 scene,
                 directAnalysis,
-                request.getSelectedGenres(),
+                request, // <--- MODIFICATION: Pass the whole request
                 topArtists,
                 totalTracks,
                 user.getAccessToken()
@@ -179,7 +179,8 @@ public class PlaylistOrchestrationService {
      * Get tracks for a story scene using mood profiles
      */
     private List<Track> getTracksForScene(Scene scene, SceneAnalysis sceneAnalysis,
-                                          List<String> selectedGenres, List<String> topArtists,
+                                          PlaylistGenerateRequest request, // <--- MODIFICATION: Parameter changed
+                                          List<String> topArtists,
                                           int limit, String accessToken) {
 
         // Get mood profile for this scene
@@ -189,10 +190,11 @@ public class PlaylistOrchestrationService {
         List<String> genres = sceneAnalysis.getSuggestedGenres() != null
                 && !sceneAnalysis.getSuggestedGenres().isEmpty()
                 ? sceneAnalysis.getSuggestedGenres()
-                : selectedGenres;
+                : request.getSelectedGenres(); // <--- MODIFICATION: Get from request
 
         // Extract prompt keywords (using scene description as proxy for prompt context)
-        String promptKeywords = extractKeywordsFromPrompt(sceneAnalysis.getDescription());
+        // <--- MODIFICATION: Combine original prompt + AI theme
+        String promptKeywords = extractKeywordsFromPrompt(request.getPrompt() + " " + sceneAnalysis.getDescription());
 
         // Build recommendation request (now used for Last.fm + search)
         SpotifyRecommendationRequest recommendationRequest = SpotifyRecommendationRequest.builder()
@@ -227,7 +229,8 @@ public class PlaylistOrchestrationService {
      * Get tracks for direct mode
      */
     private List<Track> getTracksForDirectMode(Scene scene, DirectModeAnalysis directAnalysis,
-                                               List<String> selectedGenres, List<String> topArtists,
+                                               PlaylistGenerateRequest request, // <--- MODIFICATION: Parameter changed
+                                               List<String> topArtists,
                                                int limit, String accessToken) {
 
         MoodProfile moodProfile = spotifyService.getMoodProfile(directAnalysis.getMood());
@@ -235,10 +238,10 @@ public class PlaylistOrchestrationService {
         List<String> genres = directAnalysis.getExtractedGenres() != null
                 && !directAnalysis.getExtractedGenres().isEmpty()
                 ? directAnalysis.getExtractedGenres()
-                : selectedGenres;
+                : request.getSelectedGenres();
 
         // Extract prompt keywords from the original prompt or theme
-        String promptKeywords = extractKeywordsFromPrompt(directAnalysis.getTheme());
+        String promptKeywords = extractKeywordsFromPrompt(request.getPrompt() + " " + directAnalysis.getTheme());
 
         SpotifyRecommendationRequest recommendationRequest = SpotifyRecommendationRequest.builder()
                 .seedGenres(genres)

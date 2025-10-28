@@ -34,10 +34,13 @@ public class PlaylistGenerateRequest {
 
     @Min(value = 5, message = "Minimum 5 tracks per scene")
     @Max(value = 10, message = "Maximum 10 tracks per scene")
+    @JsonProperty("tracks_per_scene")
     private Integer tracksPerScene = 5;
 
+    @JsonProperty("create_spotify_playlist")
     private Boolean createSpotifyPlaylist = false;
 
+    @JsonProperty("is_public")
     private Boolean isPublic = false;
 
     private Boolean usePersonalization = true;
