@@ -44,7 +44,7 @@ spring:
               - user-top-read
               - playlist-modify-public
               - playlist-modify-private
-            redirect-uri: "{baseUrl}/login/oauth2/code/spotify"
+            redirect-uri: "https://audynce.vercel.app/auth/callback"
             authorization-grant-type: authorization_code
             provider: spotify
         provider:
@@ -67,7 +67,7 @@ app:
     expiration: 86400000 # 24 hours
 
   frontend:
-    url: ${FRONTEND_URL:http://localhost:3000}
+    url: ${FRONTEND_URL:https://audynce.vercel.app}
 
   spotify:
     api-url: https://api.spotify.com/v1
