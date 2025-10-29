@@ -44,7 +44,7 @@ spring:
               - user-top-read
               - playlist-modify-public
               - playlist-modify-private
-            redirect-uri: "https://audynce.vercel.app/auth/callback"
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
             authorization-grant-type: authorization_code
             provider: spotify
         provider:
