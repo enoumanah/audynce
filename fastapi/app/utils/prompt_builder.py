@@ -27,7 +27,7 @@ Rules:
 - Maximum 6 scenes
 - Mood must be ONE of the listed options in CAPS
 - Keep descriptions under 100 characters
-- Match genres to the scene mood"""
+- **Match genres to the scene mood and User's preferred genres.**""" # <-- Added rule
 
 def build_direct_prompt(prompt: str, genres: List[str]) -> str:
     """Build prompt for direct mode analysis"""
@@ -43,12 +43,12 @@ Respond ONLY with valid JSON in this exact format:
 {{
   "mood": "UPBEAT|MELANCHOLIC|ROMANTIC|ADVENTUROUS|PEACEFUL|ENERGETIC|INTENSE|NOSTALGIC|DREAMY|CHILL|BALANCED",
   "genres": ["genre1", "genre2", "genre3"],
-  "keywords": ["keyword1", "keyword2"],
+  "keywords": ["keyword1", "keyword2", "keyword3"],
   "theme": "brief description"
 }}
 
 Rules:
 - Mood must be ONE of the listed options in CAPS
-- Include 2-4 genres
-- Extract 3-5 keywords
-- Theme should be under 50 characters"""
+- **The 'genres' list MUST prioritize the User's preferred genres if they are relevant to the Request.**
+- **The 'keywords' list MUST contain 3-5 MUSICAL keywords, adjectives, or vibes from the Request (e.g., 'chill', 'soulful', 'party'). Do NOT include locations (like 'Lekki') or non-musical nouns (like 'traffic').**
+- Theme should be under 50 characters""" 
