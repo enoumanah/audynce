@@ -11,6 +11,8 @@ import com.audience.app.dto.spotify.MoodProfile;
 import com.audience.app.dto.spotify.SpotifyRecommendationRequest;
 import com.audience.app.entity.*;
 import com.audience.app.repository.PlaylistRepository;
+// SceneRepository might not be needed directly if using Cascade correctly
+// import com.audience.app.repository.SceneRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,7 +20,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
-import org.springframework.util.StringUtils;
+import org.springframework.util.StringUtils; // Import StringUtils
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
@@ -32,6 +34,8 @@ import java.util.stream.Collectors;
 public class PlaylistOrchestrationService {
 
     private final PlaylistRepository playlistRepository;
+    // SceneRepository might not be needed if relying on cascade from Playlist
+    // private final SceneRepository sceneRepository;
     private final UserService userService;
     private final AIServiceClient aiServiceClient;
     private final SpotifyService spotifyService;
@@ -42,6 +46,7 @@ public class PlaylistOrchestrationService {
     @Value("${app.playlist.max-total-tracks:50}")
     private int maxTotalTracks;
 
+    // Common English stopwords + specific context words to ignore
     private static final List<String> STOPWORDS = List.of(
             "a", "an", "the", "with", "in", "to", "and", "or", "for", "i", "my", "me", "is", "are",
             "music", "playlist", "song", "songs", "track", "tracks", "vibe", "mood", "feeling"
@@ -81,12 +86,13 @@ public class PlaylistOrchestrationService {
         Playlist playlist = createPlaylistEntity(user, request, aiAnalysis);
 
         // 5. Generate scenes and tracks based on AI analysis mode
-        if (aiAnalysis != null && aiAnalysis.getMode() == AIAnalysisResponse.AnalysisMode.STORY) {
+        if (aiAnalysis != null && aiAnalysis.getMode() == AIAnalysisResponse.AnalysisMode.STORY) { // Add null check for aiAnalysis
             generateStoryModePlaylist(playlist, aiAnalysis, request, topArtists, user);
-        } else if (aiAnalysis != null && aiAnalysis.getMode() == AIAnalysisResponse.AnalysisMode.DIRECT) {
+        } else if (aiAnalysis != null && aiAnalysis.getMode() == AIAnalysisResponse.AnalysisMode.DIRECT) { // Add null check for aiAnalysis
             generateDirectModePlaylist(playlist, aiAnalysis, request, topArtists, user);
         } else {
             log.error("AI Analysis response was null or mode was not set. Cannot generate tracks.");
+            // Create an empty scene or handle as appropriate
             Scene fallbackScene = Scene.builder()
                     .playlist(playlist) // Set relationship
                     .sceneNumber(1)
@@ -250,11 +256,11 @@ public class PlaylistOrchestrationService {
 
         MoodProfile moodProfile = spotifyService.getMoodProfile(sceneAnalysis.getMood());
 
-        // Reliable Genre Fallback
         List<String> genres = determineGenres(sceneAnalysis.getSuggestedGenres(), request.getSelectedGenres());
         log.debug("Using genres for scene {}: {}", scene.getSceneNumber(), genres);
 
-        // Extract keywords ONLY from the scene description for story mode
+        // **CRITICAL FIX**: Use AI's suggested keywords from the scene description,
+        // NOT the full prompt.
         String promptKeywords = extractKeywords(sceneAnalysis.getDescription());
         log.debug("Extracted keywords for scene {}: '{}'", scene.getSceneNumber(), promptKeywords);
 
@@ -289,13 +295,23 @@ public class PlaylistOrchestrationService {
 
         MoodProfile moodProfile = spotifyService.getMoodProfile(directAnalysis.getMood());
 
-        // Reliable Genre Fallback
         List<String> genres = determineGenres(directAnalysis.getExtractedGenres(), request.getSelectedGenres());
         log.debug("Using genres for direct mode: {}", genres);
 
-        // Extract keywords from BOTH original prompt AND AI theme for direct mode
-        String promptKeywords = extractKeywords(request.getPrompt() + " " + directAnalysis.getTheme());
-        log.debug("Extracted keywords for direct mode: '{}'", promptKeywords);
+        // **CRITICAL FIX**: Use the keywords *from the AI analysis*, not from parsing the raw prompt.
+        // This stops "lekki" and "traffic" from being used as search terms.
+        String promptKeywords = "";
+        if (!CollectionUtils.isEmpty(directAnalysis.getKeywords())) {
+            promptKeywords = String.join(" ", directAnalysis.getKeywords());
+        }
+
+        // Fallback if AI gives no keywords, use the theme
+        if (!StringUtils.hasText(promptKeywords) && StringUtils.hasText(directAnalysis.getTheme())) {
+            promptKeywords = extractKeywords(directAnalysis.getTheme());
+            log.warn("AI returned no keywords, falling back to theme: '{}'", promptKeywords);
+        }
+
+        log.debug("Using extracted keywords for direct mode: '{}'", promptKeywords);
 
         SpotifyRecommendationRequest recommendationRequest = SpotifyRecommendationRequest.builder()
                 .seedGenres(genres)
@@ -327,7 +343,6 @@ public class PlaylistOrchestrationService {
         if (!CollectionUtils.isEmpty(validAiGenres)) {
             return validAiGenres;
         } else {
-
             return Optional.ofNullable(userGenres).orElse(List.of()).stream()
                     .filter(g -> g != null && SpotifyService.VALID_SPOTIFY_GENRES.contains(g.trim().toLowerCase()))
                     .collect(Collectors.toList());
@@ -454,7 +469,6 @@ public class PlaylistOrchestrationService {
      * Create Spotify playlist for user
      */
     private void createSpotifyPlaylistForUser(Playlist playlist, User user) {
-        // Use the playlist entity to get tracks
         List<String> trackUris = List.of();
         if (playlist.getScenes() != null) {
             trackUris = playlist.getScenes().stream()
@@ -474,11 +488,9 @@ public class PlaylistOrchestrationService {
 
         if (!isValidAccessToken(user.getAccessToken())) {
             log.error("Invalid/expired access token—skipping Spotify export for playlist ID {}", playlist.getId());
-            // TODO: Implement refresh token logic here or throw specific exception
             return;
         }
 
-        // **FIX**: Use the isPublic value from the *Playlist entity*
         boolean isPublicPlaylist = Boolean.TRUE.equals(playlist.getIsPublic());
 
         String spotifyPlaylistId = spotifyService.createSpotifyPlaylist(
@@ -486,11 +498,10 @@ public class PlaylistOrchestrationService {
                 playlist.getTitle(),
                 playlist.getDescription(),
                 trackUris,
-                isPublicPlaylist // Use the value from the playlist entity
+                isPublicPlaylist
         );
 
         if (spotifyPlaylistId != null) {
-            // Update the managed playlist entity (will be saved by @Transactional)
             playlist.setSpotifyPlaylistId(spotifyPlaylistId);
             log.info("Successfully requested Spotify playlist creation: {}. Spotify ID set on Playlist entity.", spotifyPlaylistId);
         } else {
@@ -501,7 +512,7 @@ public class PlaylistOrchestrationService {
 
     /** Helper: Quick token validation */
     private boolean isValidAccessToken(String token) {
-        if (!StringUtils.hasText(token)) { // Use StringUtils
+        if (!StringUtils.hasText(token)) {
             log.warn("isValidAccessToken called with null or empty token.");
             return false;
         }
@@ -511,15 +522,14 @@ public class PlaylistOrchestrationService {
                     .uri("/me")
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                     .retrieve()
-                    // Corrected onStatus handler
-                    .onStatus(status -> status.isError(), // Handles 4xx and 5xx
-                            clientResponse -> clientResponse.bodyToMono(String.class)
-                                    .switchIfEmpty(Mono.just("{ \"error\": \"Empty error body from Spotify /me\" }"))
-                                    .flatMap(body -> {
-                                        log.warn("Token validation failed via /me endpoint with status: {}. Body: {}", clientResponse.statusCode(), body);
-                                        // Return Mono<Throwable>
-                                        return Mono.error(new RuntimeException("Token validation failed with status: " + clientResponse.statusCode()));
-                                    })
+                    .onStatus(status -> status.isError(),
+                            clientResponse ->
+                                    clientResponse.bodyToMono(String.class)
+                                            .switchIfEmpty(Mono.just("{ \"error\": \"Empty error body from Spotify /me\" }"))
+                                            .flatMap(body -> {
+                                                log.warn("Token validation failed via /me endpoint with status: {}. Body: {}", clientResponse.statusCode(), body);
+                                                return Mono.error(new RuntimeException("Token validation failed with status: " + clientResponse.statusCode()));
+                                            })
                     )
                     .bodyToMono(Void.class)
                     .block(Duration.ofSeconds(5));
@@ -541,7 +551,6 @@ public class PlaylistOrchestrationService {
     private Playlist createPlaylistEntity(User user, PlaylistGenerateRequest request,
                                           AIAnalysisResponse aiAnalysis) {
         String title = generatePlaylistTitle(request.getPrompt(), aiAnalysis);
-        // Pass user's selected genres to description helper
         String description = generatePlaylistDescription(request.getPrompt(), aiAnalysis, request.getSelectedGenres());
 
         boolean isPublicRequest = Boolean.TRUE.equals(request.getIsPublic());
@@ -553,9 +562,8 @@ public class PlaylistOrchestrationService {
                 .aiAnalysisId(aiAnalysis != null ? aiAnalysis.getAnalysisId() : "fallback-or-error")
                 .user(user)
                 .isPublic(isPublicRequest)
-                // Ensure list is modifiable if needed later, handle null
                 .selectedGenres(request.getSelectedGenres() != null ? new ArrayList<>(request.getSelectedGenres()) : new ArrayList<>())
-                .scenes(new ArrayList<>()) // Initialize scenes list
+                .scenes(new ArrayList<>())
                 .build();
     }
 
@@ -568,13 +576,13 @@ public class PlaylistOrchestrationService {
             String firstSceneDesc = (!CollectionUtils.isEmpty(aiAnalysis.getScenes()) && aiAnalysis.getScenes().get(0) != null)
                     ? aiAnalysis.getScenes().get(0).getDescription()
                     : null;
-            if (StringUtils.hasText(firstSceneDesc)) { // Use StringUtils
+            if (StringUtils.hasText(firstSceneDesc)) {
                 return "Soundtrack: " + truncate(firstSceneDesc, 40);
             } else {
                 return "Story Soundtrack: " + truncate(prompt, 30);
             }
         } else {
-            return "Audynce: " + truncate(prompt, 50);
+            return "Audiance: " + truncate(prompt, 50);
         }
     }
 
@@ -582,13 +590,12 @@ public class PlaylistOrchestrationService {
     /**
      * Generate playlist description
      */
-    private String generatePlaylistDescription(String prompt, AIAnalysisResponse aiAnalysis, List<String> selectedGenres) { // Added selectedGenres
+    private String generatePlaylistDescription(String prompt, AIAnalysisResponse aiAnalysis, List<String> selectedGenres) {
         if (aiAnalysis != null && aiAnalysis.getMode() == AIAnalysisResponse.AnalysisMode.STORY && !CollectionUtils.isEmpty(aiAnalysis.getScenes())) {
             int sceneCount = (int) aiAnalysis.getScenes().stream().filter(Objects::nonNull).count();
-            return String.format("A %d-scene musical journey based on your story. Generated by Audynce.", sceneCount);
+            return String.format("A %d-scene musical journey based on your story. Generated by Audiance.", sceneCount);
         } else {
             String genresString = "";
-            // Prioritize AI extracted genres if available and valid
             if (aiAnalysis != null && aiAnalysis.getDirectAnalysis() != null && !CollectionUtils.isEmpty(aiAnalysis.getDirectAnalysis().getExtractedGenres())) {
                 List<String> validAiGenres = aiAnalysis.getDirectAnalysis().getExtractedGenres().stream()
                         .filter(g -> g != null && SpotifyService.VALID_SPOTIFY_GENRES.contains(g.trim().toLowerCase()))
@@ -597,7 +604,6 @@ public class PlaylistOrchestrationService {
                     genresString = " Genres: " + String.join(", ", validAiGenres) + ".";
                 }
             }
-            // Fallback to user selected genres if AI genres weren't used or invalid
             if (genresString.isEmpty() && !CollectionUtils.isEmpty(selectedGenres)) {
                 List<String> validUserGenres = selectedGenres.stream()
                         .filter(g -> g != null && SpotifyService.VALID_SPOTIFY_GENRES.contains(g.trim().toLowerCase()))
@@ -606,7 +612,7 @@ public class PlaylistOrchestrationService {
                     genresString = " Genres: " + String.join(", ", validUserGenres) + ".";
                 }
             }
-            return "Your personalized playlist created by Audynce based on: \"" + truncate(prompt, 80) + "\"." + genresString;
+            return "Your personalized playlist created by Audiance based on: \"" + truncate(prompt, 80) + "\"." + genresString;
         }
     }
 
@@ -621,7 +627,6 @@ public class PlaylistOrchestrationService {
         }
 
         List<SceneResponse> sceneResponses = List.of();
-        // Handle potential LazyInitializationException if not eagerly fetched
         try {
             if (playlist.getScenes() != null) {
                 sceneResponses = playlist.getScenes().stream()
@@ -705,4 +710,3 @@ public class PlaylistOrchestrationService {
         }
     }
 }
-

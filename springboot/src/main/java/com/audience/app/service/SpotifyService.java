@@ -173,7 +173,7 @@ public class SpotifyService {
     public List<Map<String, Object>> getRecommendations(
             SpotifyRecommendationRequest request,
             String accessToken) {
-        
+
         if (request == null) {
             log.warn("getRecommendations called with null request.");
             return Collections.emptyList();
