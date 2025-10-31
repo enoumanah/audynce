@@ -69,12 +69,13 @@ const Results = () => {
     return null;
   }
 
-  // Generate a gradient based on the playlist (simple hash-based color)
-  const getGradientColors = (title: string) => {
-    const hash = title.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const hue1 = hash % 360;
-    const hue2 = (hash + 120) % 360;
-    return `linear-gradient(135deg, hsl(${hue1}, 70%, 50%), hsl(${hue2}, 70%, 50%))`;
+  // Get first 4 tracks for album art grid
+  const getFirstFourTracks = () => {
+    const allTracks: Track[] = [];
+    playlistData.scenes.forEach(scene => {
+      allTracks.push(...scene.tracks);
+    });
+    return allTracks.slice(0, 4);
   };
 
   return (
@@ -97,13 +98,24 @@ const Results = () => {
         <div className="space-y-8 animate-fade-in">
           {/* Playlist Header */}
           <div className="text-center space-y-4">
-            {/* Dynamic Album Cover */}
+            {/* Dynamic Album Cover - 2x2 Grid */}
             <div className="mx-auto w-64 h-64 rounded-2xl shadow-2xl overflow-hidden">
-              <div
-                className="w-full h-full flex items-center justify-center"
-                style={{ background: getGradientColors(playlistData.title) }}
-              >
-                <Music2 className="w-24 h-24 text-white/90" />
+              <div className="grid grid-cols-2 grid-rows-2 w-full h-full gap-0">
+                {getFirstFourTracks().map((track, idx) => (
+                  <div key={idx} className="w-full h-full">
+                    <img
+                      src={track.image_url}
+                      alt={track.name}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                ))}
+                {/* Fill empty slots if less than 4 tracks */}
+                {Array.from({ length: Math.max(0, 4 - getFirstFourTracks().length) }).map((_, idx) => (
+                  <div key={`empty-${idx}`} className="w-full h-full bg-muted flex items-center justify-center">
+                    <Music2 className="w-12 h-12 text-muted-foreground/50" />
+                  </div>
+                ))}
               </div>
             </div>
 
