@@ -52,11 +52,13 @@ public class SpotifyService {
     private int topArtistsCacheHours;
 
     // Define mood tolerance
-    private static final double VALENCE_TOLERANCE = 0.2; // Allow +/- 0.2 for valence
-    private static final double ENERGY_TOLERANCE = 0.2;  // Allow +/- 0.2 for energy
+    // **FIX**: Widen tolerance slightly to catch more songs
+    private static final double VALENCE_TOLERANCE = 0.25; // Allow +/- 0.25 for valence
+    private static final double ENERGY_TOLERANCE = 0.25;  // Allow +/- 0.25 for energy
 
 
     public static final Set<String> VALID_SPOTIFY_GENRES = Set.of(
+            // ... (your existing set of genres)
             "acoustic", "afrobeat", "alt-rock", "alternative", "ambient", "anime", "black-metal",
             "bluegrass", "blues", "bossanova", "brazil", "breakbeat", "british", "cantopop",
             "chicago-house", "children", "chill", "classical", "club", "comedy", "country",
@@ -78,6 +80,7 @@ public class SpotifyService {
 
 
     public Mono<String> getClientAccessToken() {
+        // ... (existing method, no changes)
         WebClient webClient = webClientBuilder.baseUrl(spotifyAccountsUrl).build();
         String credentials = Base64.getEncoder().encodeToString((clientId + ":" + clientSecret).getBytes());
         return webClient.post()
@@ -174,6 +177,7 @@ public class SpotifyService {
             SpotifyRecommendationRequest request,
             String accessToken) {
 
+        // --- Input Validation and Preparation ---
         if (request == null) {
             log.warn("getRecommendations called with null request.");
             return Collections.emptyList();
@@ -191,52 +195,44 @@ public class SpotifyService {
         MoodProfile mood = request.getMoodProfile();
         int finalLimit = Optional.ofNullable(request.getLimit()).orElse(10);
         finalLimit = Math.max(1, Math.min(finalLimit, 50));
-        int searchLimit = Math.min(finalLimit * 3, 50); // Fetch 3x tracks, max 50
+        // **FIX**: Fetch *more* candidates to filter. 50 is the max for one search.
+        int searchLimit = 50;
 
         String promptKeywords = Optional.ofNullable(request.getPromptKeywords()).orElse("").trim();
         String cleanedKeywords = promptKeywords.replace("\"", "");
+        String yearRange = " year:2000-" + LocalDateTime.now().getYear();
 
         Set<Map<String, Object>> candidateTracksSet = new LinkedHashSet<>();
 
-        // --- Build Base Search Query ---
-        StringBuilder baseQueryBuilder = new StringBuilder();
-        if (StringUtils.hasText(cleanedKeywords)) {
-            baseQueryBuilder.append(cleanedKeywords).append(" ");
-        }
-        // **FIX**: REMOVED moodQuery from here.
-        baseQueryBuilder.append(" year:2000-").append(LocalDateTime.now().getYear());
-        String baseQuery = baseQueryBuilder.toString().trim();
+        // --- Execute Searches (Candidate Generation) ---
 
-        String genreFilter = seedGenresInput.stream()
+        // **FIX**: Create separate queries
+        String keywordQuery = (cleanedKeywords + yearRange).trim();
+        String genreQuery = seedGenresInput.stream()
                 .map(g -> "genre:\"" + g + "\"")
                 .collect(Collectors.joining(" "));
 
-        // --- Execute Searches (Candidate Generation) ---
-
-        // Search 1: Keywords + Genres
+        // Search 1: Keywords + Genres (The most specific search)
         if (StringUtils.hasText(cleanedKeywords) && !seedGenresInput.isEmpty()) {
-            String query1 = (baseQuery + " " + genreFilter).trim();
-            log.info("Search 1 (Keywords + Year + Genres): {}", query1);
+            String query1 = (cleanedKeywords + " " + genreQuery + yearRange).trim();
+            log.info("Search 1 (Keywords + Genres): {}", query1);
             candidateTracksSet.addAll(searchTracks(query1, searchLimit, accessToken));
         }
-        // Search 2: Keywords only (if no genres, or to get more)
-        if (StringUtils.hasText(baseQuery) && candidateTracksSet.size() < searchLimit) {
-            log.info("Search 2 (Keywords + Year only): {}", baseQuery);
-            candidateTracksSet.addAll(searchTracks(baseQuery, searchLimit, accessToken));
-        }
-        // Search 3: Genres only (if no keywords, or to get more)
-        if (!seedGenresInput.isEmpty() && candidateTracksSet.size() < searchLimit) {
-            log.info("Search 3 (Genres only): {}", genreFilter.trim());
-            candidateTracksSet.addAll(searchTracks(genreFilter.trim(), searchLimit, accessToken));
+
+        // Search 2: Keywords only (Finds tracks matching text, regardless of genre)
+        if (StringUtils.hasText(cleanedKeywords)) {
+            log.info("Search 2 (Keywords Only): {}", keywordQuery);
+            candidateTracksSet.addAll(searchTracks(keywordQuery, searchLimit, accessToken));
         }
 
-        if (candidateTracksSet.size() < searchLimit && candidateTracksSet.isEmpty() && seedGenresInput.isEmpty() && !StringUtils.hasText(baseQuery)) {
-            log.warn("Cannot perform initial search: No keywords or genres provided.");
+        // Search 3: Genres only (Finds popular songs in that genre)
+        if (!seedGenresInput.isEmpty()) {
+            log.info("Search 3 (Genres Only): {}", genreQuery.trim());
+            candidateTracksSet.addAll(searchTracks(genreQuery.trim(), searchLimit, accessToken));
         }
 
-
-        // Search 4: Boost with Artists
-        if (candidateTracksSet.size() < finalLimit * 2 && !seedArtistsInput.isEmpty()) {
+        // Search 4: Artist Boost (if personalization is on)
+        if (!seedArtistsInput.isEmpty()) {
             List<String> artistsToSearch = new ArrayList<>(seedArtistsInput);
             if (StringUtils.hasText(lastFmApiKey)) {
                 for (String seedArtist : seedArtistsInput.subList(0, Math.min(1, seedArtistsInput.size()))) {
@@ -247,45 +243,66 @@ public class SpotifyService {
 
             for (String artist : artistsToSearch) {
                 String artistFilter = "artist:\"" + artist.replace("\"", "") + "\"";
-                // **FIX**: Combine artist with baseQuery (keywords) OR artist with genres.
-                String query4_keywords = (artistFilter + " " + baseQuery).trim();
-                String query4_genres = (artistFilter + " " + genreFilter).trim();
+                // **FIX**: Search for artist + keywords, AND artist + genres
+                String query4a = (artistFilter + " " + keywordQuery).trim();
+                log.info("Search 4a (Artist + Keywords): {}", query4a);
+                candidateTracksSet.addAll(searchTracks(query4a, 10, accessToken)); // Get 10 per artist/keyword combo
 
-                log.info("Search 4a (Artist + Keywords): {}", query4_keywords);
-                candidateTracksSet.addAll(searchTracks(query4_keywords, Math.max(finalLimit / 3, 5), accessToken));
-
-                if (candidateTracksSet.size() < searchLimit) {
-                    log.info("Search 4b (Artist + Genres): {}", query4_genres);
-                    candidateTracksSet.addAll(searchTracks(query4_genres, Math.max(finalLimit / 3, 5), accessToken));
+                if (!seedGenresInput.isEmpty()) {
+                    String query4b = (artistFilter + " " + genreQuery).trim();
+                    log.info("Search 4b (Artist + Genres): {}", query4b);
+                    candidateTracksSet.addAll(searchTracks(query4b, 10, accessToken)); // Get 10 per artist/genre combo
                 }
-                if (candidateTracksSet.size() >= searchLimit) break;
             }
         }
 
-        if (candidateTracksSet.isEmpty()) {
-            log.warn("No tracks found after all searches for request: {}", request);
-            return Collections.emptyList();
+        // **FIX**: Add a filter to remove generic "lofi radio" tracks
+        List<Map<String, Object>> initialCandidates = new ArrayList<>(candidateTracksSet);
+        List<Map<String, Object>> realTracks = initialCandidates.stream()
+                .filter(track -> {
+                    String artistName = (String) ((Map<String, Object>) ((List<Object>) track.get("artists")).get(0)).get("name");
+                    String trackName = (String) track.get("name");
+                    return !isGenericTrack(artistName, trackName);
+                })
+                .collect(Collectors.toList());
+
+        log.info("Found {} total candidates. Filtered out {} generic tracks, left with {}.",
+                initialCandidates.size(), initialCandidates.size() - realTracks.size(), realTracks.size());
+
+        if (realTracks.isEmpty()) {
+            log.warn("No real tracks found after all searches and filtering for request: {}", request);
+            if (!candidateTracksSet.isEmpty()) {
+                log.warn("Falling back to generic tracks, as no real tracks were found.");
+                realTracks = new ArrayList<>(candidateTracksSet); // Use the generic ones if it's all we have
+            } else {
+                return Collections.emptyList(); // Truly no results
+            }
         }
 
         // --- **STEP 2**: Mood Filtering ---
-        log.info("Found {} candidate tracks. Now filtering for mood...", candidateTracksSet.size());
+        log.info("Now filtering {} tracks for mood...", realTracks.size());
 
-        List<String> trackIds = candidateTracksSet.stream()
+        List<String> trackIds = realTracks.stream()
                 .map(track -> (String) track.get("id"))
                 .filter(Objects::nonNull)
                 .distinct()
                 .collect(Collectors.toList());
 
-        Map<String, AudioFeatures> featuresMap = getAudioFeatures(trackIds, accessToken);
+        // **FIX**: Process in batches of 100 for getAudioFeatures
+        Map<String, AudioFeatures> featuresMap = new HashMap<>();
+        int batchSize = 100;
+        for (int i = 0; i < trackIds.size(); i += batchSize) {
+            List<String> batchIds = trackIds.subList(i, Math.min(i + batchSize, trackIds.size()));
+            featuresMap.putAll(getAudioFeatures(batchIds, accessToken));
+        }
 
         if (featuresMap.isEmpty()) {
             log.warn("Could not retrieve any audio features. Returning unfiltered search results.");
-            List<Map<String, Object>> fallbackTracks = new ArrayList<>(candidateTracksSet);
-            Collections.shuffle(fallbackTracks);
-            return fallbackTracks.subList(0, Math.min(finalLimit, fallbackTracks.size()));
+            Collections.shuffle(realTracks);
+            return realTracks.subList(0, Math.min(finalLimit, realTracks.size()));
         }
 
-        List<Map<String, Object>> moodFilteredTracks = candidateTracksSet.stream()
+        List<Map<String, Object>> moodFilteredTracks = realTracks.stream()
                 .filter(track -> {
                     String id = (String) track.get("id");
                     AudioFeatures features = featuresMap.get(id);
@@ -295,13 +312,13 @@ public class SpotifyService {
 
         log.info("Filtered down to {} tracks based on mood profile.", moodFilteredTracks.size());
 
-        // If filtering was too strict, use the original list as a fallback
-        if (moodFilteredTracks.isEmpty() && !candidateTracksSet.isEmpty()) {
-            log.warn("Mood filtering removed all tracks. Using original search candidates as fallback.");
-            moodFilteredTracks = new ArrayList<>(candidateTracksSet); // Use the original set
+        // If filtering was too strict, use the original "realTracks" list as a fallback
+        if (moodFilteredTracks.isEmpty() && !realTracks.isEmpty()) {
+            log.warn("Mood filtering removed all tracks. Using original 'real' tracks as fallback.");
+            moodFilteredTracks = new ArrayList<>(realTracks);
         } else if (moodFilteredTracks.size() < finalLimit / 2) {
-            log.warn("Mood filtering was very strict ({} results). Using original search candidates as fallback.", moodFilteredTracks.size());
-            moodFilteredTracks = new ArrayList<>(candidateTracksSet); // Use the original set
+            log.warn("Mood filtering was very strict ({} results). Using original 'real' tracks as fallback.", moodFilteredTracks.size());
+            moodFilteredTracks = new ArrayList<>(realTracks);
         }
 
 
@@ -314,13 +331,33 @@ public class SpotifyService {
     }
 
     /**
-     * Helper method to check if a track's features match the mood profile
+     * **NEW**: Helper method to filter out generic-sounding tracks
+     */
+    private boolean isGenericTrack(String artistName, String trackName) {
+        if (artistName == null || trackName == null) return true; // Invalid track
+        String lowerArtist = artistName.toLowerCase();
+        String lowerTrack = trackName.toLowerCase();
+
+        if (lowerArtist.contains("radio") || lowerArtist.contains("station") || lowerArtist.contains("chill flow") ||
+                lowerArtist.contains("mellow mood") || lowerArtist.contains("lofi")) {
+            return true; // Artist sounds generic
+        }
+        if (lowerTrack.contains("lofi") || lowerTrack.contains("chillhop")) {
+            return true; // Track name sounds generic
+        }
+        return false;
+    }
+
+
+    /**
+     * **NEW**: Helper method to check if a track's features match the mood profile
      */
     private boolean isTrackMoodMatch(AudioFeatures features, MoodProfile mood) {
         if (mood == null) {
-            return true; // No mood profile, all tracks match
+            return true; // If no mood is specified, all tracks match
         }
 
+        // Get target values from the profile, providing defaults if null
         double targetValence = Optional.ofNullable(mood.getTargetValence()).orElse(0.5);
         double targetEnergy = Optional.ofNullable(mood.getTargetEnergy()).orElse(0.5);
 
@@ -349,73 +386,74 @@ public class SpotifyService {
 
 
     /**
-     * Fetches Audio Features for a list of track IDs
+     * **MODIFIED**: Fetches Audio Features for a list of track IDs (up to 100)
      */
     private Map<String, AudioFeatures> getAudioFeatures(List<String> trackIds, String accessToken) {
         if (CollectionUtils.isEmpty(trackIds)) {
             return Collections.emptyMap();
         }
 
+        // Ensure batch size is max 100
+        if (trackIds.size() > 100) {
+            log.warn("getAudioFeatures was called with {} IDs, truncating to 100.", trackIds.size());
+            trackIds = trackIds.subList(0, 100);
+        }
+
         WebClient webClient = webClientBuilder.baseUrl(spotifyApiUrl).build();
         Map<String, AudioFeatures> featuresMap = new HashMap<>();
+        String idsQueryParam = String.join(",", trackIds);
 
-        int batchSize = 100;
-        for (int i = 0; i < trackIds.size(); i += batchSize) {
-            List<String> batchIds = trackIds.subList(i, Math.min(i + batchSize, trackIds.size()));
-            String idsQueryParam = String.join(",", batchIds);
+        try {
+            Map<String, Object> response = webClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/audio-features")
+                            .queryParam("ids", idsQueryParam)
+                            .build())
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                    .retrieve()
+                    .onStatus(status -> status.isError(),
+                            clientResponse -> clientResponse.bodyToMono(String.class)
+                                    .switchIfEmpty(Mono.just("{ \"error\": \"Empty error body\" }"))
+                                    .flatMap(body -> {
+                                        log.error("Spotify API error fetching audio features: {} - Body: {}", clientResponse.statusCode(), body);
+                                        return Mono.error(new RuntimeException("Failed to fetch audio features, status: " + clientResponse.statusCode()));
+                                    }))
+                    .bodyToMono(Map.class)
+                    .block(Duration.ofSeconds(10));
 
-            try {
-                Map<String, Object> response = webClient.get()
-                        .uri(uriBuilder -> uriBuilder
-                                .path("/audio-features")
-                                .queryParam("ids", idsQueryParam)
-                                .build())
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
-                        .retrieve()
-                        .onStatus(status -> status.isError(),
-                                clientResponse -> clientResponse.bodyToMono(String.class)
-                                        .switchIfEmpty(Mono.just("{ \"error\": \"Empty error body\" }"))
-                                        .flatMap(body -> {
-                                            log.error("Spotify API error fetching audio features: {} - Body: {}", clientResponse.statusCode(), body);
-                                            return Mono.error(new RuntimeException("Failed to fetch audio features, status: " + clientResponse.statusCode()));
-                                        }))
-                        .bodyToMono(Map.class)
-                        .block(Duration.ofSeconds(10));
-
-                if (response != null && response.get("audio_features") instanceof List<?> featuresList) {
-                    for (Object featureObj : featuresList) {
-                        // **FIX**: Add null check for featureObj itself
-                        if (featureObj instanceof Map) {
-                            try {
-                                Map<String, Object> featureMap = (Map<String, Object>) featureObj;
-                                // Check for nulls *before* casting
-                                if (featureMap != null && featureMap.get("id") != null &&
-                                        featureMap.get("valence") != null && featureMap.get("energy") != null &&
-                                        featureMap.get("danceability") != null && featureMap.get("acousticness") != null &&
-                                        featureMap.get("instrumentalness") != null && featureMap.get("tempo") != null)
-                                {
-                                    AudioFeatures features = new AudioFeatures();
-                                    features.setId((String) featureMap.get("id"));
-                                    features.setValence(((Number) featureMap.get("valence")).doubleValue());
-                                    features.setEnergy(((Number) featureMap.get("energy")).doubleValue());
-                                    features.setDanceability(((Number) featureMap.get("danceability")).doubleValue());
-                                    features.setAcousticness(((Number) featureMap.get("acousticness")).doubleValue());
-                                    features.setInstrumentalness(((Number) featureMap.get("instrumentalness")).doubleValue());
-                                    features.setTempo(((Number) featureMap.get("tempo")).floatValue());
-                                    featuresMap.put(features.getId(), features);
-                                } else {
-                                    log.warn("Skipping audio feature item with missing fields: {}", featureMap);
-                                }
-                            } catch (Exception e) {
-                                log.warn("Failed to parse one audio feature item: {}", featureObj, e);
+            if (response != null && response.get("audio_features") instanceof List<?> featuresList) {
+                for (Object featureObj : featuresList) {
+                    if (featureObj instanceof Map) {
+                        try {
+                            Map<String, Object> featureMap = (Map<String, Object>) featureObj;
+                            // **FIX**: Check for nulls *before* casting
+                            if (featureMap != null && featureMap.get("id") != null &&
+                                    featureMap.get("valence") != null && featureMap.get("energy") != null &&
+                                    featureMap.get("danceability") != null && featureMap.get("acousticness") != null &&
+                                    featureMap.get("instrumentalness") != null && featureMap.get("tempo") != null)
+                            {
+                                AudioFeatures features = new AudioFeatures();
+                                features.setId((String) featureMap.get("id"));
+                                features.setValence(((Number) featureMap.get("valence")).doubleValue());
+                                features.setEnergy(((Number) featureMap.get("energy")).doubleValue());
+                                features.setDanceability(((Number) featureMap.get("danceability")).doubleValue());
+                                features.setAcousticness(((Number) featureMap.get("acousticness")).doubleValue());
+                                features.setInstrumentalness(((Number) featureMap.get("instrumentalness")).doubleValue());
+                                features.setTempo(((Number) featureMap.get("tempo")).floatValue());
+                                featuresMap.put(features.getId(), features);
+                            } else {
+                                log.warn("Skipping audio feature item with missing fields: {}", featureMap);
                             }
+                        } catch (Exception e) {
+                            log.warn("Failed to parse one audio feature item: {}", featureObj, e);
                         }
                     }
                 }
-            } catch (Exception e) {
-                log.error("Error fetching audio features batch: {}", e.getMessage(), e);
             }
+        } catch (Exception e) {
+            log.error("Error fetching audio features batch: {}", e.getMessage(), e);
         }
+
         log.info("Successfully fetched {} audio features for {} track IDs", featuresMap.size(), trackIds.size());
         return featuresMap;
     }
@@ -665,6 +703,7 @@ public class SpotifyService {
 
 
     private List<String> parseTopArtistsCache(String cache, int limit) {
+        // ... (existing method, no changes)
         if (!StringUtils.hasText(cache)) {
             return Collections.emptyList();
         }
@@ -675,3 +714,4 @@ public class SpotifyService {
                 .collect(Collectors.toList());
     }
 }
+
