@@ -27,7 +27,7 @@ class AIService:
             base_url="https://router.huggingface.co/v1",
             api_key=token
         )
-        self.model = "meta-llama/Llama-3.3-70B-Instruct:groq"
+        self.model = "meta-llama/Llama-3.3-70B-Instruct:groq" 
 
     async def analyze_prompt(self, prompt: str, selected_genres: List[str], story_threshold: int) -> AIAnalysisResponse:
         word_count = len(prompt.split())
@@ -78,7 +78,7 @@ class AIService:
             logger.info(f"✓ API call successful ({len(content)} chars)")
             return content.strip()
         except Exception as e:
-            logger.error(f"❌ API call failed: {e}")
+            logger.error(f"API call failed: {e}")
             raise
 
     def _parse_story_response(self, response: str, genres: List[str]) -> List[SceneAnalysis]:
@@ -89,9 +89,7 @@ class AIService:
                 scenes.append(SceneAnalysis(
                     scene_number=i,
                     description=sc.get("description", f"Scene {i}"),
-                    mood=MoodType(sc.get("mood", "BALANCED")),
-                    suggested_genres=sc.get("genres", genres[:3]),
-                    energy_level=sc.get("energy", "medium")
+                    search_query=sc.get("search_query", " ".join(genres) if genres else "popular music")
                 ))
             logger.info(f"✓ Parsed {len(scenes)} scenes")
             return scenes
@@ -103,10 +101,8 @@ class AIService:
         try:
             json_data = self._extract_json(response)
             return DirectModeAnalysis(
-                mood=MoodType(json_data.get("mood", "BALANCED")),
-                extracted_genres=json_data.get("genres", genres),
-                keywords=json_data.get("keywords", []),
-                theme=json_data.get("theme", "Music playlist")
+                theme=json_data.get("theme", "Music playlist"),
+                search_query=json_data.get("search_query", " ".join(genres) if genres else "popular music")
             )
         except Exception as e:
             logger.warning(f"Failed to parse direct response: {e}")
@@ -120,18 +116,18 @@ class AIService:
 
     def _fallback_story_scenes(self, prompt: str, selected_genres: List[str]) -> List[SceneAnalysis]:
         logger.info("Using rule-based fallback for story scenes")
+        genre_str = " ".join(selected_genres) if selected_genres else "pop"
         return [
-            SceneAnalysis(scene_number=1, description="Opening - Setting the mood", mood=MoodType.PEACEFUL, suggested_genres=selected_genres[:3] or ["pop"], energy_level="low"),
-            SceneAnalysis(scene_number=2, description="Development - Rising action", mood=MoodType.UPBEAT, suggested_genres=selected_genres[:3] or ["pop"], energy_level="medium"),
-            SceneAnalysis(scene_number=3, description="Climax - Emotional high point", mood=MoodType.INTENSE, suggested_genres=selected_genres[:3] or ["rock"], energy_level="high"),
-            SceneAnalysis(scene_number=4, description="Resolution - Calm ending", mood=MoodType.NOSTALGIC, suggested_genres=selected_genres[:3] or ["indie"], energy_level="medium")
+            SceneAnalysis(scene_number=1, description="Opening - Setting the mood", search_query=f"peaceful {genre_str}"),
+            SceneAnalysis(scene_number=2, description="Development - Rising action", search_query=f"upbeat {genre_str}"),
+            SceneAnalysis(scene_number=3, description="Climax - Emotional high point", search_query=f"intense {genre_str} epic"),
+            SceneAnalysis(scene_number=4, description="Resolution - Calm ending", search_query=f"nostalgic {genre_str} chill")
         ]
 
     def _fallback_direct_analysis(self, prompt: str, selected_genres: List[str]) -> DirectModeAnalysis:
         logger.info("Using rule-based fallback for direct analysis")
+        genre_str = " ".join(selected_genres) if selected_genres else "pop indie"
         return DirectModeAnalysis(
-            mood=MoodType.BALANCED,
-            extracted_genres=selected_genres or ["pop", "indie"],
-            keywords=prompt.split()[:5],
-            theme=prompt[:50] if prompt else "General playlist"
+            theme=prompt[:50] if prompt else "General playlist",
+            search_query=f"{prompt} {genre_str}"
         )

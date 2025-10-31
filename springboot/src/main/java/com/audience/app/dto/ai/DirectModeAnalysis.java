@@ -13,8 +13,6 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class DirectModeAnalysis {
-    private MoodType mood;
-    private List<String> extractedGenres;
-    private List<String> keywords;
     private String theme;
+    private String searchQuery;
 }

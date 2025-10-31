@@ -3,7 +3,7 @@ package com.audience.app.service;
 import com.audience.app.dto.ai.AIAnalysisResponse;
 import com.audience.app.dto.ai.DirectModeAnalysis;
 import com.audience.app.dto.ai.SceneAnalysis;
-import com.audience.app.entity.MoodType;
+// import com.audience.app.entity.MoodType; // No longer needed here
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -11,12 +11,13 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
+import reactor.core.publisher.Mono; // Import Mono
 
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors; // Import Collectors
 
 @Service
 @RequiredArgsConstructor
@@ -78,11 +79,20 @@ public class AIServiceClient {
 
     /**
      * Fallback if AI service is unavailable
+     * UPDATED to use search_query
      */
     private AIAnalysisResponse createFallbackResponse(String prompt, List<String> selectedGenres) {
         log.warn("Using fallback AI response");
 
         int wordCount = prompt.split("\\s+").length;
+
+        // Combine selected genres into a string for the query
+        String genreStr = selectedGenres != null ?
+                selectedGenres.stream().collect(Collectors.joining(" ")) : "pop";
+        if (genreStr.isBlank()) {
+            genreStr = "pop"; // Ensure there's at least one genre
+        }
+
 
         if (wordCount >= storyModeThreshold) {
             // Story mode fallback
@@ -93,23 +103,20 @@ public class AIServiceClient {
                             SceneAnalysis.builder()
                                     .sceneNumber(1)
                                     .description("Beginning")
-                                    .mood(MoodType.BALANCED)
-                                    .suggestedGenres(selectedGenres)
-                                    .energyLevel("medium")
+                                    // NEW: Set searchQuery
+                                    .searchQuery("peaceful " + genreStr)
                                     .build(),
                             SceneAnalysis.builder()
                                     .sceneNumber(2)
                                     .description("Middle")
-                                    .mood(MoodType.UPBEAT)
-                                    .suggestedGenres(selectedGenres)
-                                    .energyLevel("high")
+                                    // NEW: Set searchQuery
+                                    .searchQuery("upbeat " + genreStr)
                                     .build(),
                             SceneAnalysis.builder()
                                     .sceneNumber(3)
                                     .description("End")
-                                    .mood(MoodType.PEACEFUL)
-                                    .suggestedGenres(selectedGenres)
-                                    .energyLevel("low")
+                                    // NEW: Set searchQuery
+                                    .searchQuery("epic " + genreStr)
                                     .build()
                     ))
                     .build();
@@ -119,10 +126,9 @@ public class AIServiceClient {
                     .analysisId("fallback-" + System.currentTimeMillis())
                     .mode(AIAnalysisResponse.AnalysisMode.DIRECT)
                     .directAnalysis(DirectModeAnalysis.builder()
-                            .mood(MoodType.BALANCED)
-                            .extractedGenres(selectedGenres)
-                            .keywords(List.of("music", "playlist"))
+                            // NEW: Set theme and searchQuery
                             .theme(prompt.substring(0, Math.min(50, prompt.length())))
+                            .searchQuery(prompt + " " + genreStr)
                             .build())
                     .build();
         }
