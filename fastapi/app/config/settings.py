@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     
     mongodb_uri: Optional[str] = None
     mongodb_database: str = "audynce"
-    story_mode_threshold: int = 80
+    story_mode_threshold: int = 30
     max_scenes: int = 5
     port: int = 8000
 
