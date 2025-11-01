@@ -29,12 +29,15 @@ class AnalysisRequest(BaseModel):
 class SceneAnalysis(BaseModel):
     scene_number: int
     description: str
-    
-    search_query: str = Field(..., description="The final Spotify search query for this scene")
+    mood: MoodType
+    suggested_genres: List[str] = Field(default_factory=list)
+    energy_level: str  # "high", "medium", "low"
 
 class DirectModeAnalysis(BaseModel):
-    theme: str 
-    search_query: str = Field(..., description="The final Spotify search query for this request")
+    mood: MoodType
+    extracted_genres: List[str]
+    keywords: List[str]
+    theme: str
 
 class AIAnalysisResponse(BaseModel):
     analysis_id: str

@@ -7,8 +7,12 @@ import com.audience.app.dto.request.PlaylistGenerateRequest;
 import com.audience.app.dto.response.PlaylistResponse;
 import com.audience.app.dto.response.SceneResponse;
 import com.audience.app.dto.response.TrackResponse;
+import com.audience.app.dto.spotify.MoodProfile;
+import com.audience.app.dto.spotify.SpotifyRecommendationRequest;
 import com.audience.app.entity.*;
 import com.audience.app.repository.PlaylistRepository;
+// SceneRepository might not be needed directly if using Cascade correctly
+// import com.audience.app.repository.SceneRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,17 +20,12 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
-import org.springframework.util.StringUtils;
+import org.springframework.util.StringUtils; // Import StringUtils
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
-import java.util.ArrayList; // Make sure this is imported
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -35,6 +34,8 @@ import java.util.stream.Collectors;
 public class PlaylistOrchestrationService {
 
     private final PlaylistRepository playlistRepository;
+    // SceneRepository might not be needed if relying on cascade from Playlist
+    // private final SceneRepository sceneRepository;
     private final UserService userService;
     private final AIServiceClient aiServiceClient;
     private final SpotifyService spotifyService;
@@ -44,6 +45,12 @@ public class PlaylistOrchestrationService {
 
     @Value("${app.playlist.max-total-tracks:50}")
     private int maxTotalTracks;
+
+    // Common English stopwords + specific context words to ignore
+    private static final List<String> STOPWORDS = List.of(
+            "a", "an", "the", "with", "in", "to", "and", "or", "for", "i", "my", "me", "is", "are",
+            "music", "playlist", "song", "songs", "track", "tracks", "vibe", "mood", "feeling"
+    );
 
 
     /**
@@ -59,44 +66,45 @@ public class PlaylistOrchestrationService {
         User user = userService.findBySpotifyId(spotifyId)
                 .orElseThrow(() -> new RuntimeException("User not found: " + spotifyId));
 
-        // 2. Get user's top artists for personalization (if enabled)
-        // THIS BLOCK IS NOW ACTIVE
+        // 2. Call AI service to analyze prompt
+        AIAnalysisResponse aiAnalysis = aiServiceClient.analyzePrompt(
+                request.getPrompt(),
+                request.getSelectedGenres()
+        );
+
+        // 3. Get user's top artists for personalization (if enabled)
         List<String> topArtists = new ArrayList<>();
         if (Boolean.TRUE.equals(request.getUsePersonalization())) { // Check boolean value correctly
-            topArtists = spotifyService.getUserTopArtists(user, 3); // Get top 3 artists
-            log.info("Using {} top artists for personalization: {}", topArtists.size(), topArtists);
+            topArtists = spotifyService.getUserTopArtists(user, 2); // Limit to 2 for less bias
+            log.info("Using {} top artists for personalization", topArtists.size());
         } else {
             log.info("Personalization disabled by request.");
         }
 
-        // 3. Call AI service to analyze prompt
-        AIAnalysisResponse aiAnalysis = aiServiceClient.analyzePrompt(
-                request.getPrompt(),
-                request.getSelectedGenres(),
-                topArtists // <-- PASS THE ARTIST LIST HERE
-        );
 
         // 4. Create playlist entity
         Playlist playlist = createPlaylistEntity(user, request, aiAnalysis);
 
         // 5. Generate scenes and tracks based on AI analysis mode
-        if (aiAnalysis != null && aiAnalysis.getMode() == AIAnalysisResponse.AnalysisMode.STORY) {
-            generateStoryModePlaylist(playlist, aiAnalysis, request, user);
-        } else if (aiAnalysis != null && aiAnalysis.getMode() == AIAnalysisResponse.AnalysisMode.DIRECT) {
-            generateDirectModePlaylist(playlist, aiAnalysis, request, user);
+        if (aiAnalysis != null && aiAnalysis.getMode() == AIAnalysisResponse.AnalysisMode.STORY) { // Add null check for aiAnalysis
+            generateStoryModePlaylist(playlist, aiAnalysis, request, topArtists, user);
+        } else if (aiAnalysis != null && aiAnalysis.getMode() == AIAnalysisResponse.AnalysisMode.DIRECT) { // Add null check for aiAnalysis
+            generateDirectModePlaylist(playlist, aiAnalysis, request, topArtists, user);
         } else {
             log.error("AI Analysis response was null or mode was not set. Cannot generate tracks.");
+            // Create an empty scene or handle as appropriate
             Scene fallbackScene = Scene.builder()
-                    .playlist(playlist)
+                    .playlist(playlist) // Set relationship
                     .sceneNumber(1)
                     .mood(MoodType.BALANCED)
                     .description("Could not generate tracks due to AI analysis error.")
-                    .tracks(new ArrayList<>())
+                    .tracks(new ArrayList<>()) // Initialize tracks list
                     .build();
             playlist.getScenes().add(fallbackScene);
         }
 
         // 6. Save playlist (includes scenes and tracks due to cascade)
+        // Ensure bidirectional relationships are set *before* saving
         for (Scene scene : playlist.getScenes()) {
             scene.setPlaylist(playlist);
             if (scene.getTracks() != null) {
@@ -110,7 +118,10 @@ public class PlaylistOrchestrationService {
 
         // 7. Create Spotify playlist if requested
         if (Boolean.TRUE.equals(request.getCreateSpotifyPlaylist())) {
+            // Pass the SAVED playlist which now has IDs
             createSpotifyPlaylistForUser(savedPlaylist, user);
+            // Re-save might be needed if spotifyPlaylistId was updated within the transaction
+            // Saving again at the end handles this.
         } else {
             log.info("Spotify playlist creation not requested (create_spotify_playlist={})", request.getCreateSpotifyPlaylist());
         }
@@ -119,6 +130,7 @@ public class PlaylistOrchestrationService {
         // 8. Calculate generation time and save potentially updated Spotify ID
         long endTime = System.currentTimeMillis();
         savedPlaylist.setGenerationTimeMs(endTime - startTime);
+        // spotifyPlaylistId might have been set in createSpotifyPlaylistForUser
         savedPlaylist = playlistRepository.save(savedPlaylist); // Save again
 
         log.info("Playlist generation complete. ID: {}, Scenes: {}, Total tracks: {}, Spotify ID: {}, Time: {}ms",
@@ -128,11 +140,13 @@ public class PlaylistOrchestrationService {
                         .filter(Objects::nonNull)
                         .mapToInt(s -> s.getTracks() != null ? s.getTracks().size() : 0).sum()
                         : 0,
-                savedPlaylist.getSpotifyPlaylistId() != null ? savedPlaylist.getSpotifyPlaylistId() : "N/A",
+                savedPlaylist.getSpotifyPlaylistId() != null ? savedPlaylist.getSpotifyPlaylistId() : "N/A", // Log spotify ID
                 savedPlaylist.getGenerationTimeMs());
 
+        // Fetch again with scenes and tracks for the response DTO mapping
+        // Using findByIdWithScenes ensures lazy collections are loaded within the transaction
         Playlist finalPlaylist = playlistRepository.findByIdWithScenes(savedPlaylist.getId())
-                .orElse(savedPlaylist);
+                .orElse(savedPlaylist); // Fallback
 
         return mapToPlaylistResponse(finalPlaylist);
     }
@@ -141,7 +155,7 @@ public class PlaylistOrchestrationService {
      * Generate playlist for STORY mode (multiple scenes)
      */
     private void generateStoryModePlaylist(Playlist playlist, AIAnalysisResponse aiAnalysis,
-                                           PlaylistGenerateRequest request, User user) {
+                                           PlaylistGenerateRequest request, List<String> topArtists, User user) {
 
         log.info("Generating STORY mode playlist with {} scenes", aiAnalysis.getScenes() != null ? aiAnalysis.getScenes().size() : 0);
 
@@ -162,19 +176,23 @@ public class PlaylistOrchestrationService {
                 continue;
             }
             Scene scene = Scene.builder()
+                    // Playlist relationship set before main save
                     .sceneNumber(sceneAnalysis.getSceneNumber() != null ? sceneAnalysis.getSceneNumber() : playlist.getScenes().size() + 1)
+                    .mood(sceneAnalysis.getMood() != null ? sceneAnalysis.getMood() : MoodType.BALANCED)
                     .description(sceneAnalysis.getDescription() != null ? sceneAnalysis.getDescription() : "Scene")
-                    .tracks(new ArrayList<>())
+                    .tracks(new ArrayList<>()) // Initialize tracks list
                     .build();
 
             List<Track> tracks = getTracksForScene(
                     scene,
                     sceneAnalysis,
+                    request,
+                    topArtists,
                     tracksPerScene,
                     accessToken
             );
 
-            scene.setTracks(tracks);
+            scene.setTracks(tracks); // Tracks have scene set inside getTracksForScene
             playlist.getScenes().add(scene);
         }
     }
@@ -183,7 +201,7 @@ public class PlaylistOrchestrationService {
      * Generate playlist for DIRECT mode (single scene, simpler)
      */
     private void generateDirectModePlaylist(Playlist playlist, AIAnalysisResponse aiAnalysis,
-                                            PlaylistGenerateRequest request, User user) {
+                                            PlaylistGenerateRequest request, List<String> topArtists, User user) {
 
         log.info("Generating DIRECT mode playlist");
 
@@ -208,75 +226,127 @@ public class PlaylistOrchestrationService {
         if (totalTracks <= 0) totalTracks = defaultTracksPerScene;
 
         Scene scene = Scene.builder()
+                // Playlist relationship set before main save
                 .sceneNumber(1)
-                .description(directAnalysis.getTheme() != null ? directAnalysis.getTheme() : "Playlist")
-                .tracks(new ArrayList<>())
+                .mood(directAnalysis.getMood() != null ? directAnalysis.getMood() : MoodType.BALANCED)
+                .description(directAnalysis.getTheme() != null ? directAnalysis.getTheme() : "Playlist") // Fallback theme
+                .tracks(new ArrayList<>()) // Initialize tracks list
                 .build();
 
         List<Track> tracks = getTracksForDirectMode(
                 scene,
                 directAnalysis,
+                request,
+                topArtists,
                 totalTracks,
                 user.getAccessToken()
         );
 
-        scene.setTracks(tracks);
+        scene.setTracks(tracks); // Tracks have scene set inside getTracksForDirectMode
         playlist.getScenes().add(scene);
     }
 
     /**
-     * Get tracks for a story scene using AI search query
+     * Get tracks for a story scene using mood profiles
      */
     private List<Track> getTracksForScene(Scene scene, SceneAnalysis sceneAnalysis,
+                                          PlaylistGenerateRequest request,
+                                          List<String> topArtists,
                                           int limit, String accessToken) {
 
-        String searchQuery = sceneAnalysis.getSearchQuery();
-        if (!StringUtils.hasText(searchQuery)) {
-            log.warn("AI returned empty search query for scene {}. Skipping track search.", scene.getSceneNumber());
-            return Collections.emptyList();
-        }
+        MoodProfile moodProfile = spotifyService.getMoodProfile(sceneAnalysis.getMood());
 
-        log.info("Calling Spotify search for scene {}: '{}'", scene.getSceneNumber(), searchQuery);
+        List<String> genres = determineGenres(sceneAnalysis.getSuggestedGenres(), request.getSelectedGenres());
+        log.debug("Using genres for scene {}: {}", scene.getSceneNumber(), genres);
 
-        List<Map<String, Object>> spotifyTracks = spotifyService.searchTracks(
-                searchQuery,
-                limit,
+        // **CRITICAL FIX**: Use AI's suggested keywords from the scene description,
+        // NOT the full prompt.
+        String promptKeywords = extractKeywords(sceneAnalysis.getDescription());
+        log.debug("Extracted keywords for scene {}: '{}'", scene.getSceneNumber(), promptKeywords);
+
+        SpotifyRecommendationRequest recommendationRequest = SpotifyRecommendationRequest.builder()
+                .seedGenres(genres)
+                .seedArtists(topArtists != null ? topArtists : List.of())
+                .moodProfile(moodProfile)
+                .limit(limit)
+                .promptKeywords(promptKeywords)
+                .build();
+
+        List<Map<String, Object>> spotifyTracks = spotifyService.getRecommendations(
+                recommendationRequest,
                 accessToken
         );
 
         List<Track> tracks = mapAndAssociateTracks(spotifyTracks, scene);
 
-        log.info("Generated {} tracks for scene {}",
-                tracks.size(), scene.getSceneNumber());
+        log.info("Generated {} tracks for scene {} ({})",
+                tracks.size(), scene.getSceneNumber(), scene.getMood());
 
         return tracks;
     }
 
     /**
-     * Get tracks for direct mode using AI search query
+     * Get tracks for direct mode
      */
     private List<Track> getTracksForDirectMode(Scene scene, DirectModeAnalysis directAnalysis,
+                                               PlaylistGenerateRequest request,
+                                               List<String> topArtists,
                                                int limit, String accessToken) {
 
-        String searchQuery = directAnalysis.getSearchQuery();
-        if (!StringUtils.hasText(searchQuery)) {
-            log.warn("AI returned empty search query for direct mode. Skipping track search.");
-            return Collections.emptyList();
+        MoodProfile moodProfile = spotifyService.getMoodProfile(directAnalysis.getMood());
+
+        List<String> genres = determineGenres(directAnalysis.getExtractedGenres(), request.getSelectedGenres());
+        log.debug("Using genres for direct mode: {}", genres);
+
+        // **CRITICAL FIX**: Use the keywords *from the AI analysis*, not from parsing the raw prompt.
+        // This stops "lekki" and "traffic" from being used as search terms.
+        String promptKeywords = "";
+        if (!CollectionUtils.isEmpty(directAnalysis.getKeywords())) {
+            promptKeywords = String.join(" ", directAnalysis.getKeywords());
         }
 
-        log.info("Calling Spotify search for direct mode: '{}'", searchQuery);
+        // Fallback if AI gives no keywords, use the theme
+        if (!StringUtils.hasText(promptKeywords) && StringUtils.hasText(directAnalysis.getTheme())) {
+            promptKeywords = extractKeywords(directAnalysis.getTheme());
+            log.warn("AI returned no keywords, falling back to theme: '{}'", promptKeywords);
+        }
 
-        List<Map<String, Object>> spotifyTracks = spotifyService.searchTracks(
-                searchQuery,
-                limit,
+        log.debug("Using extracted keywords for direct mode: '{}'", promptKeywords);
+
+        SpotifyRecommendationRequest recommendationRequest = SpotifyRecommendationRequest.builder()
+                .seedGenres(genres)
+                .seedArtists(topArtists != null ? topArtists : List.of())
+                .moodProfile(moodProfile)
+                .limit(limit)
+                .promptKeywords(promptKeywords)
+                .build();
+
+        List<Map<String, Object>> spotifyTracks = spotifyService.getRecommendations(
+                recommendationRequest,
                 accessToken
         );
 
+        // Convert and associate tracks
         List<Track> tracks = mapAndAssociateTracks(spotifyTracks, scene);
 
         log.info("Generated {} tracks for direct mode", tracks.size());
 
         return tracks;
+    }
+
+    /** Helper to determine genres, preferring valid AI genres, falling back to valid user genres */
+    private List<String> determineGenres(List<String> aiGenres, List<String> userGenres) {
+        List<String> validAiGenres = Optional.ofNullable(aiGenres).orElse(List.of()).stream()
+                .filter(g -> g != null && SpotifyService.VALID_SPOTIFY_GENRES.contains(g.trim().toLowerCase()))
+                .collect(Collectors.toList());
+
+        if (!CollectionUtils.isEmpty(validAiGenres)) {
+            return validAiGenres;
+        } else {
+            return Optional.ofNullable(userGenres).orElse(List.of()).stream()
+                    .filter(g -> g != null && SpotifyService.VALID_SPOTIFY_GENRES.contains(g.trim().toLowerCase()))
+                    .collect(Collectors.toList());
+        }
     }
 
     /** Helper to map Spotify track data and associate with the Scene */
@@ -297,6 +367,24 @@ public class PlaylistOrchestrationService {
             }
         }
         return tracks;
+    }
+
+
+    /**
+     * Improved Keyword Extraction - More selective.
+     */
+    private String extractKeywords(String text) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        String normalizedText = text.toLowerCase().replaceAll("[^a-z0-9\\s]", "");
+        List<String> keywords = Arrays.stream(normalizedText.split("\\s+"))
+                .map(String::trim)
+                .filter(word -> !word.isBlank() && !STOPWORDS.contains(word))
+                .distinct()
+                .limit(5)
+                .collect(Collectors.toList());
+        return String.join(" ", keywords);
     }
 
 
@@ -365,6 +453,7 @@ public class PlaylistOrchestrationService {
                     .externalUrl(spotifyUrl)
                     .durationMs(durationMs)
                     .position(position)
+                    // Scene is set in the calling method (mapAndAssociateTracks)
                     .build();
         } catch (ClassCastException cce) {
             log.error("Type casting error mapping Spotify track data: {}. Data: {}", cce.getMessage(), spotifyTrack, cce);
@@ -492,9 +581,6 @@ public class PlaylistOrchestrationService {
             } else {
                 return "Story Soundtrack: " + truncate(prompt, 30);
             }
-        } else if (aiAnalysis != null && aiAnalysis.getDirectAnalysis() != null && StringUtils.hasText(aiAnalysis.getDirectAnalysis().getTheme())) {
-            // NEW: Use the AI's theme for the title
-            return "Audiance: " + aiAnalysis.getDirectAnalysis().getTheme();
         } else {
             return "Audiance: " + truncate(prompt, 50);
         }
@@ -510,7 +596,15 @@ public class PlaylistOrchestrationService {
             return String.format("A %d-scene musical journey based on your story. Generated by Audiance.", sceneCount);
         } else {
             String genresString = "";
-            if (!CollectionUtils.isEmpty(selectedGenres)) {
+            if (aiAnalysis != null && aiAnalysis.getDirectAnalysis() != null && !CollectionUtils.isEmpty(aiAnalysis.getDirectAnalysis().getExtractedGenres())) {
+                List<String> validAiGenres = aiAnalysis.getDirectAnalysis().getExtractedGenres().stream()
+                        .filter(g -> g != null && SpotifyService.VALID_SPOTIFY_GENRES.contains(g.trim().toLowerCase()))
+                        .collect(Collectors.toList());
+                if (!CollectionUtils.isEmpty(validAiGenres)){
+                    genresString = " Genres: " + String.join(", ", validAiGenres) + ".";
+                }
+            }
+            if (genresString.isEmpty() && !CollectionUtils.isEmpty(selectedGenres)) {
                 List<String> validUserGenres = selectedGenres.stream()
                         .filter(g -> g != null && SpotifyService.VALID_SPOTIFY_GENRES.contains(g.trim().toLowerCase()))
                         .collect(Collectors.toList());

@@ -27,7 +27,7 @@ class AIService:
             base_url="https://router.huggingface.co/v1",
             api_key=token
         )
-        self.model = "meta-llama/Llama-3.3-70B-Instruct:groq" # Your model setting
+        self.model = "meta-llama/Llama-3.3-70B-Instruct:groq" 
 
     # MODIFIED signature to accept top_artists
     async def analyze_prompt(self, prompt: str, selected_genres: List[str], story_threshold: int, top_artists: List[str]) -> AIAnalysisResponse:
@@ -92,7 +92,9 @@ class AIService:
                 scenes.append(SceneAnalysis(
                     scene_number=i,
                     description=sc.get("description", f"Scene {i}"),
-                    search_query=sc.get("search_query", " ".join(genres) if genres else "popular music")
+                    mood=MoodType(sc.get("mood", "BALANCED")),
+                    suggested_genres=sc.get("genres", genres[:3]),
+                    energy_level=sc.get("energy", "medium")
                 ))
             logger.info(f"✓ Parsed {len(scenes)} scenes")
             return scenes
@@ -105,8 +107,10 @@ class AIService:
         try:
             json_data = self._extract_json(response)
             return DirectModeAnalysis(
-                theme=json_data.get("theme", "Music playlist"),
-                search_query=json_data.get("search_query", " ".join(genres) if genres else "popular music")
+                mood=MoodType(json_data.get("mood", "BALANCED")),
+                extracted_genres=json_data.get("genres", genres),
+                keywords=json_data.get("keywords", []),
+                theme=json_data.get("theme", "Music playlist")
             )
         except Exception as e:
             logger.warning(f"Failed to parse direct response: {e}")
@@ -123,18 +127,17 @@ class AIService:
     def _fallback_story_scenes(self, prompt: str, selected_genres: List[str], top_artists: List[str]) -> List[SceneAnalysis]:
         logger.info("Using rule-based fallback for story scenes")
         genre_str = " ".join(selected_genres) if selected_genres else "pop"
-        artist_str = f" artist:\"{top_artists[0]}\"" if top_artists and top_artists[0] else ""
         return [
-            SceneAnalysis(scene_number=1, description="Beginning", search_query=f"peaceful {genre_str}{artist_str}"),
-            SceneAnalysis(scene_number=2, description="Development", search_query=f"upbeat {genre_str}{artist_str}"),
-            SceneAnalysis(scene_number=3, description="Resolution", search_query=f"nostalgic {genre_str}{artist_str}")
+            SceneAnalysis(scene_number=1, description="Opening - Setting the mood", search_query=f"peaceful {genre_str}"),
+            SceneAnalysis(scene_number=2, description="Development - Rising action", search_query=f"upbeat {genre_str}"),
+            SceneAnalysis(scene_number=3, description="Climax - Emotional high point", search_query=f"intense {genre_str} epic"),
+            SceneAnalysis(scene_number=4, description="Resolution - Calm ending", search_query=f"nostalgic {genre_str} chill")
         ]
 
     def _fallback_direct_analysis(self, prompt: str, selected_genres: List[str], top_artists: List[str]) -> DirectModeAnalysis:
         logger.info("Using rule-based fallback for direct analysis")
         genre_str = " ".join(selected_genres) if selected_genres else "pop indie"
-        artist_str = f" artist:\"{top_artists[0]}\"" if top_artists and top_artists[0] else ""
         return DirectModeAnalysis(
             theme=prompt[:50] if prompt else "General playlist",
-            search_query=f"{prompt} {genre_str}{artist_str}"
+            search_query=f"{prompt} {genre_str}"
         )
