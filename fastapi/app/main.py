@@ -68,9 +68,7 @@ async def analyze_story(request: AnalysisRequest):
         logger.info(f"Received analysis request: {len(request.prompt)} chars")
         
         # Check cache first
-        # UPDATE CACHE HASH to include personalization
-        prompt_hash_str = f"{request.prompt}:{','.join(request.selected_genres)}:{','.join(request.top_artists)}"
-        prompt_hash = str(hash(prompt_hash_str))
+        prompt_hash = str(hash(request.prompt))
         cached = await cache_service.get_cached_analysis(prompt_hash)
         
         if cached:
@@ -81,8 +79,7 @@ async def analyze_story(request: AnalysisRequest):
         analysis = await ai_service.analyze_prompt(
             request.prompt,
             request.selected_genres,
-            request.story_threshold,
-            request.top_artists  # <-- PASS THE NEW FIELD
+            request.story_threshold
         )
         
         # Cache the result

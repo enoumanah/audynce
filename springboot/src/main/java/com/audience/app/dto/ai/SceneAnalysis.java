@@ -15,7 +15,5 @@ import java.util.List;
 public class SceneAnalysis {
     private Integer sceneNumber;
     private String description;
-    private MoodType mood;
-    private List<String> suggestedGenres;
-    private String energyLevel;
+    private String searchQuery;
 }
