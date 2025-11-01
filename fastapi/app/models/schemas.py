@@ -24,6 +24,7 @@ class AnalysisRequest(BaseModel):
     prompt: str = Field(..., min_length=10, max_length=2000)
     selected_genres: List[str] = Field(default_factory=list)
     story_threshold: int = 100
+    top_artists: List[str] = Field(default_factory=list, description="List of user's top artists for personalization")
 
 class SceneAnalysis(BaseModel):
     scene_number: int

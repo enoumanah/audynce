@@ -7,12 +7,8 @@ import com.audience.app.dto.request.PlaylistGenerateRequest;
 import com.audience.app.dto.response.PlaylistResponse;
 import com.audience.app.dto.response.SceneResponse;
 import com.audience.app.dto.response.TrackResponse;
-// REMOVED: import com.audience.app.dto.spotify.MoodProfile;
-// REMOVED: import com.audience.app.dto.spotify.SpotifyRecommendationRequest;
 import com.audience.app.entity.*;
 import com.audience.app.repository.PlaylistRepository;
-// SceneRepository might not be needed directly if using Cascade correctly
-// import com.audience.app.repository.SceneRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,12 +16,17 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
-import org.springframework.util.StringUtils; // Import StringUtils
+import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList; // Make sure this is imported
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -34,8 +35,6 @@ import java.util.stream.Collectors;
 public class PlaylistOrchestrationService {
 
     private final PlaylistRepository playlistRepository;
-    // SceneRepository might not be needed if relying on cascade from Playlist
-    // private final SceneRepository sceneRepository;
     private final UserService userService;
     private final AIServiceClient aiServiceClient;
     private final SpotifyService spotifyService;
@@ -45,9 +44,6 @@ public class PlaylistOrchestrationService {
 
     @Value("${app.playlist.max-total-tracks:50}")
     private int maxTotalTracks;
-
-    // REMOVED: Stopwords are no longer needed, AI handles this
-    // private static final List<String> STOPWORDS = List.of(...);
 
 
     /**
@@ -63,49 +59,44 @@ public class PlaylistOrchestrationService {
         User user = userService.findBySpotifyId(spotifyId)
                 .orElseThrow(() -> new RuntimeException("User not found: " + spotifyId));
 
-        // 2. Call AI service to analyze prompt
-        AIAnalysisResponse aiAnalysis = aiServiceClient.analyzePrompt(
-                request.getPrompt(),
-                request.getSelectedGenres()
-        );
-
-        // 3. Get user's top artists for personalization (if enabled)
-        // ** NOTE: This is no longer used for seeding, but we can keep it for future logic.
-        // ** For now, we will comment out the call to simplify.
-        /*
+        // 2. Get user's top artists for personalization (if enabled)
+        // THIS BLOCK IS NOW ACTIVE
         List<String> topArtists = new ArrayList<>();
         if (Boolean.TRUE.equals(request.getUsePersonalization())) { // Check boolean value correctly
-            topArtists = spotifyService.getUserTopArtists(user, 2); // Limit to 2 for less bias
-            log.info("Using {} top artists for personalization", topArtists.size());
+            topArtists = spotifyService.getUserTopArtists(user, 3); // Get top 3 artists
+            log.info("Using {} top artists for personalization: {}", topArtists.size(), topArtists);
         } else {
             log.info("Personalization disabled by request.");
         }
-        */
 
+        // 3. Call AI service to analyze prompt
+        AIAnalysisResponse aiAnalysis = aiServiceClient.analyzePrompt(
+                request.getPrompt(),
+                request.getSelectedGenres(),
+                topArtists // <-- PASS THE ARTIST LIST HERE
+        );
 
         // 4. Create playlist entity
         Playlist playlist = createPlaylistEntity(user, request, aiAnalysis);
 
         // 5. Generate scenes and tracks based on AI analysis mode
-        if (aiAnalysis != null && aiAnalysis.getMode() == AIAnalysisResponse.AnalysisMode.STORY) { // Add null check for aiAnalysis
+        if (aiAnalysis != null && aiAnalysis.getMode() == AIAnalysisResponse.AnalysisMode.STORY) {
             generateStoryModePlaylist(playlist, aiAnalysis, request, user);
-        } else if (aiAnalysis != null && aiAnalysis.getMode() == AIAnalysisResponse.AnalysisMode.DIRECT) { // Add null check for aiAnalysis
+        } else if (aiAnalysis != null && aiAnalysis.getMode() == AIAnalysisResponse.AnalysisMode.DIRECT) {
             generateDirectModePlaylist(playlist, aiAnalysis, request, user);
         } else {
             log.error("AI Analysis response was null or mode was not set. Cannot generate tracks.");
-            // Create an empty scene or handle as appropriate
             Scene fallbackScene = Scene.builder()
-                    .playlist(playlist) // Set relationship
+                    .playlist(playlist)
                     .sceneNumber(1)
-                    .mood(MoodType.BALANCED) // Mood can still be used for the DB, even if not for search
+                    .mood(MoodType.BALANCED)
                     .description("Could not generate tracks due to AI analysis error.")
-                    .tracks(new ArrayList<>()) // Initialize tracks list
+                    .tracks(new ArrayList<>())
                     .build();
             playlist.getScenes().add(fallbackScene);
         }
 
         // 6. Save playlist (includes scenes and tracks due to cascade)
-
         for (Scene scene : playlist.getScenes()) {
             scene.setPlaylist(playlist);
             if (scene.getTracks() != null) {
@@ -128,7 +119,7 @@ public class PlaylistOrchestrationService {
         // 8. Calculate generation time and save potentially updated Spotify ID
         long endTime = System.currentTimeMillis();
         savedPlaylist.setGenerationTimeMs(endTime - startTime);
-        savedPlaylist = playlistRepository.save(savedPlaylist);
+        savedPlaylist = playlistRepository.save(savedPlaylist); // Save again
 
         log.info("Playlist generation complete. ID: {}, Scenes: {}, Total tracks: {}, Spotify ID: {}, Time: {}ms",
                 savedPlaylist.getId(),
@@ -137,7 +128,7 @@ public class PlaylistOrchestrationService {
                         .filter(Objects::nonNull)
                         .mapToInt(s -> s.getTracks() != null ? s.getTracks().size() : 0).sum()
                         : 0,
-                savedPlaylist.getSpotifyPlaylistId() != null ? savedPlaylist.getSpotifyPlaylistId() : "N/A", // Log spotify ID
+                savedPlaylist.getSpotifyPlaylistId() != null ? savedPlaylist.getSpotifyPlaylistId() : "N/A",
                 savedPlaylist.getGenerationTimeMs());
 
         Playlist finalPlaylist = playlistRepository.findByIdWithScenes(savedPlaylist.getId())
@@ -245,14 +236,6 @@ public class PlaylistOrchestrationService {
             return Collections.emptyList();
         }
 
-        // Add personalization if enabled
-        // ** NOTE: This logic is simplified. A better way would be to get top artist IDs
-        // ** and append " artist:\"Artist Name\"" to the query, but that requires
-        // ** another API call. This is a simpler implementation.
-        // if (Boolean.TRUE.equals(request.getUsePersonalization()) && !topArtists.isEmpty()) {
-        //     searchQuery = searchQuery + " " + String.join(" ", topArtists);
-        // }
-
         log.info("Calling Spotify search for scene {}: '{}'", scene.getSceneNumber(), searchQuery);
 
         List<Map<String, Object>> spotifyTracks = spotifyService.searchTracks(
@@ -305,7 +288,7 @@ public class PlaylistOrchestrationService {
                 if (spotifyTrack != null && spotifyTrack.get("id") != null) {
                     Track track = mapSpotifyTrackToEntity(spotifyTrack, scene, i + 1);
                     if (track != null) {
-                        track.setScene(scene);
+                        track.setScene(scene); // Set the owning side relationship
                         tracks.add(track);
                     }
                 } else {
@@ -315,6 +298,7 @@ public class PlaylistOrchestrationService {
         }
         return tracks;
     }
+
 
     /**
      * Map Spotify API response to Track entity. Added null checks.
@@ -509,9 +493,10 @@ public class PlaylistOrchestrationService {
                 return "Story Soundtrack: " + truncate(prompt, 30);
             }
         } else if (aiAnalysis != null && aiAnalysis.getDirectAnalysis() != null && StringUtils.hasText(aiAnalysis.getDirectAnalysis().getTheme())) {
-            return "Audynce: " + aiAnalysis.getDirectAnalysis().getTheme();
+            // NEW: Use the AI's theme for the title
+            return "Audiance: " + aiAnalysis.getDirectAnalysis().getTheme();
         } else {
-            return "Audynce: " + truncate(prompt, 50);
+            return "Audiance: " + truncate(prompt, 50);
         }
     }
 
@@ -522,7 +507,7 @@ public class PlaylistOrchestrationService {
     private String generatePlaylistDescription(String prompt, AIAnalysisResponse aiAnalysis, List<String> selectedGenres) {
         if (aiAnalysis != null && aiAnalysis.getMode() == AIAnalysisResponse.AnalysisMode.STORY && !CollectionUtils.isEmpty(aiAnalysis.getScenes())) {
             int sceneCount = (int) aiAnalysis.getScenes().stream().filter(Objects::nonNull).count();
-            return String.format("A %d-scene musical journey based on your story. Generated by Audynce.", sceneCount);
+            return String.format("A %d-scene musical journey based on your story. Generated by Audiance.", sceneCount);
         } else {
             String genresString = "";
             if (!CollectionUtils.isEmpty(selectedGenres)) {
@@ -533,7 +518,7 @@ public class PlaylistOrchestrationService {
                     genresString = " Genres: " + String.join(", ", validUserGenres) + ".";
                 }
             }
-            return "Your personalized playlist created by Audynce based on: \"" + truncate(prompt, 80) + "\"." + genresString;
+            return "Your personalized playlist created by Audiance based on: \"" + truncate(prompt, 80) + "\"." + genresString;
         }
     }
 

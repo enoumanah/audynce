@@ -27,9 +27,10 @@ class AIService:
             base_url="https://router.huggingface.co/v1",
             api_key=token
         )
-        self.model = "meta-llama/Llama-3.3-70B-Instruct:groq" 
+        self.model = "meta-llama/Llama-3.3-70B-Instruct:groq" # Your model setting
 
-    async def analyze_prompt(self, prompt: str, selected_genres: List[str], story_threshold: int) -> AIAnalysisResponse:
+    # MODIFIED signature to accept top_artists
+    async def analyze_prompt(self, prompt: str, selected_genres: List[str], story_threshold: int, top_artists: List[str]) -> AIAnalysisResponse:
         word_count = len(prompt.split())
         mode = AnalysisMode.STORY if word_count >= story_threshold else AnalysisMode.DIRECT
         logger.info(f"Analyzing prompt ({word_count} words) in {mode} mode")
@@ -37,29 +38,31 @@ class AIService:
         analysis_id = f"ai-{hash(prompt)}-{int(time.time())}"
 
         if mode == AnalysisMode.STORY:
-            scenes = await self._analyze_story(prompt, selected_genres)
+            scenes = await self._analyze_story(prompt, selected_genres, top_artists) # Pass top_artists
             return AIAnalysisResponse(analysis_id=analysis_id, mode=mode, scenes=scenes)
         else:
-            direct = await self._analyze_direct(prompt, selected_genres)
+            direct = await self._analyze_direct(prompt, selected_genres, top_artists) # Pass top_artists
             return AIAnalysisResponse(analysis_id=analysis_id, mode=mode, direct_analysis=direct)
 
-    async def _analyze_story(self, prompt: str, genres: List[str]) -> List[SceneAnalysis]:
-        system_prompt = build_story_prompt(prompt, genres)
+    # MODIFIED signature
+    async def _analyze_story(self, prompt: str, genres: List[str], top_artists: List[str]) -> List[SceneAnalysis]:
+        system_prompt = build_story_prompt(prompt, genres, top_artists) # Pass top_artists
         try:
             response = self._call_huggingface(system_prompt)
             return self._parse_story_response(response, genres)
         except Exception as e:
             logger.error(f"Story analysis failed: {e}")
-            return self._fallback_story_scenes(prompt, genres)
+            return self._fallback_story_scenes(prompt, genres, top_artists) # Pass to fallback
 
-    async def _analyze_direct(self, prompt: str, genres: List[str]) -> DirectModeAnalysis:
-        system_prompt = build_direct_prompt(prompt, genres)
+    # MODIFIED signature
+    async def _analyze_direct(self, prompt: str, genres: List[str], top_artists: List[str]) -> DirectModeAnalysis:
+        system_prompt = build_direct_prompt(prompt, genres, top_artists) # Pass top_artists
         try:
             response = self._call_huggingface(system_prompt)
             return self._parse_direct_response(response, genres)
         except Exception as e:
             logger.error(f"Direct analysis failed: {e}")
-            return self._fallback_direct_analysis(prompt, genres)
+            return self._fallback_direct_analysis(prompt, genres, top_artists) # Pass to fallback
 
     def _call_huggingface(self, prompt: str) -> str:
         try:
@@ -78,7 +81,7 @@ class AIService:
             logger.info(f"✓ API call successful ({len(content)} chars)")
             return content.strip()
         except Exception as e:
-            logger.error(f"API call failed: {e}")
+            logger.error(f"❌ API call failed: {e}")
             raise
 
     def _parse_story_response(self, response: str, genres: List[str]) -> List[SceneAnalysis]:
@@ -95,7 +98,8 @@ class AIService:
             return scenes
         except Exception as e:
             logger.warning(f"Failed to parse story response: {e}")
-            return self._fallback_story_scenes("", genres)
+            # Pass empty list for top_artists to fallback if parsing fails
+            return self._fallback_story_scenes("", genres, [])
 
     def _parse_direct_response(self, response: str, genres: List[str]) -> DirectModeAnalysis:
         try:
@@ -106,7 +110,8 @@ class AIService:
             )
         except Exception as e:
             logger.warning(f"Failed to parse direct response: {e}")
-            return self._fallback_direct_analysis("", genres)
+            # Pass empty list for top_artists to fallback if parsing fails
+            return self._fallback_direct_analysis("", genres, [])
 
     def _extract_json(self, text: str) -> dict:
         start, end = text.find('{'), text.rfind('}') + 1
@@ -114,20 +119,22 @@ class AIService:
             raise ValueError("No JSON detected in model output")
         return json.loads(text[start:end])
 
-    def _fallback_story_scenes(self, prompt: str, selected_genres: List[str]) -> List[SceneAnalysis]:
+    # MODIFIED fallbacks to use top_artists
+    def _fallback_story_scenes(self, prompt: str, selected_genres: List[str], top_artists: List[str]) -> List[SceneAnalysis]:
         logger.info("Using rule-based fallback for story scenes")
         genre_str = " ".join(selected_genres) if selected_genres else "pop"
+        artist_str = f" artist:\"{top_artists[0]}\"" if top_artists and top_artists[0] else ""
         return [
-            SceneAnalysis(scene_number=1, description="Opening - Setting the mood", search_query=f"peaceful {genre_str}"),
-            SceneAnalysis(scene_number=2, description="Development - Rising action", search_query=f"upbeat {genre_str}"),
-            SceneAnalysis(scene_number=3, description="Climax - Emotional high point", search_query=f"intense {genre_str} epic"),
-            SceneAnalysis(scene_number=4, description="Resolution - Calm ending", search_query=f"nostalgic {genre_str} chill")
+            SceneAnalysis(scene_number=1, description="Beginning", search_query=f"peaceful {genre_str}{artist_str}"),
+            SceneAnalysis(scene_number=2, description="Development", search_query=f"upbeat {genre_str}{artist_str}"),
+            SceneAnalysis(scene_number=3, description="Resolution", search_query=f"nostalgic {genre_str}{artist_str}")
         ]
 
-    def _fallback_direct_analysis(self, prompt: str, selected_genres: List[str]) -> DirectModeAnalysis:
+    def _fallback_direct_analysis(self, prompt: str, selected_genres: List[str], top_artists: List[str]) -> DirectModeAnalysis:
         logger.info("Using rule-based fallback for direct analysis")
         genre_str = " ".join(selected_genres) if selected_genres else "pop indie"
+        artist_str = f" artist:\"{top_artists[0]}\"" if top_artists and top_artists[0] else ""
         return DirectModeAnalysis(
             theme=prompt[:50] if prompt else "General playlist",
-            search_query=f"{prompt} {genre_str}"
+            search_query=f"{prompt} {genre_str}{artist_str}"
         )
