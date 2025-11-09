@@ -1,73 +1,98 @@
-# Welcome to your Lovable project
+# Audynce React Frontend
 
-## Project info
+This is the user interface for the Audynce application. It is a modern, responsive single-page application (SPA) built with **React**, **Vite**, and **TypeScript**.
 
-**URL**: https://lovable.dev/projects/06ca46ae-67fe-440e-9de0-1b3f5bc70ae8
+It provides a clean, intuitive interface for users to authenticate, enter their creative prompts, and view their AI-generated playlists. The UI is built using the high-quality **shadcn-ui** component library and styled with **Tailwind CSS**.
 
-## How can I edit this code?
+-----
 
-There are several ways of editing your application.
+## 🚀 Core Features
 
-**Use Lovable**
+  * **Spotify Authentication:** A seamless login flow that redirects to the Spring Boot backend to handle the entire OAuth2 process.
+  * **JWT Session Management:** Securely receives a JWT from the backend upon login, stores it in `localStorage`, and automatically attaches it to all future API requests.
+  * **Vibe Input Form:** A dynamic form (`/create`) where users can type their prompt, select genres, and toggle options like playlist privacy.
+  * **Animated Loading:** A custom loading animation (`LoadingAnimation.tsx`) that provides a great user experience while the backend and AI are processing the request.
+  * **Playlist Results:** A clean, multi-scene layout (`/results`) to display the final generated playlist, complete with track details and an "Open in Spotify" link.
+  * **User Profile Page:** A dedicated route (`/profile`) that fetches and displays user information and a list of their previously generated playlists.
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/06ca46ae-67fe-440e-9de0-1b3f5bc70ae8) and start prompting.
+-----
 
-Changes made via Lovable will be committed automatically to this repo.
+## 🛠️ Key Components & User Flow
 
-**Use your preferred IDE**
+The frontend is built around a clear user flow managed by `react-router-dom`:
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+1.  **Login (`/`)**:
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+      * A new user lands on `Landing.tsx`.
+      * Clicking "Connect with Spotify" navigates them *away* from the React app to the Spring Boot backend's `/oauth2/authorization/spotify` endpoint to begin the OAuth flow.
 
-Follow these steps:
+2.  **Auth Callback (`/auth/callback`)**:
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+      * After a successful Spotify login, the Spring Boot backend redirects the user back to this *exact* frontend route.
+      * The `AuthCallback.tsx` component activates, grabs the **JWT** (app-specific, not the Spotify token) from the URL query parameters.
+      * It saves this JWT to `localStorage` and immediately navigates the user to the `/create` page.
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+3.  **Playlist Creation (`/create`)**:
 
-# Step 3: Install the necessary dependencies.
-npm i
+      * `Create.tsx` is the main form.
+      * The form state (prompt, genres, options) is managed using React hooks.
+      * On submit, it retrieves the JWT from `localStorage` and makes an authenticated `POST` request to the Spring Boot backend's `/api/playlists/generate` endpoint.
+      * While waiting for the response, it navigates the user to the `/results` page and displays the `LoadingAnimation.tsx` component.
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+4.  **Results Display (`/results`)**:
+
+      * The `Results.tsx` component loads the playlist data (passed via navigation state) and renders it.
+      * It includes logic to display multiple scenes (for Story Mode) or a single list (for Direct Mode).
+      * It displays the final "Open in Spotify" button if the backend provides a `spotifyPlaylistUrl`.
+
+5.  **Profile Management (`/profile`)**:
+
+      * `Profile.tsx` makes authenticated `GET` requests to `/api/users/me` and `/api/playlists` to fetch and display the user's data and their saved playlists.
+
+-----
+
+## 💻 Tech Stack
+
+  * **Framework:** React 18
+  * **Build Tool:** Vite
+  * **Language:** TypeScript
+  * **Routing:** `react-router-dom`
+  * **UI:** `shadcn-ui`
+  * **Styling:** Tailwind CSS
+  * **API Communication:** `axios` (or `fetch`)
+
+-----
+
+## 🚀 Setup & Run
+
+### 1\. Prerequisites
+
+  * Node.js (v18+) or Bun
+
+### 2\. Environment Configuration
+
+Create a `.env` file in the `/frontend` directory. It needs one variable:
+
+```
+# The URL of your running Spring Boot backend
+VITE_API_BASE_URL="http://localhost:8080"
 ```
 
-**Edit a file directly in GitHub**
+### 3\. Installation & Running
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```bash
+# From the root /frontend directory
+cd frontend
 
-**Use GitHub Codespaces**
+# Install dependencies
+npm install
+# or
+bun install
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+# Run the development server
+npm run dev
+# or
+bun dev
+```
 
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/06ca46ae-67fe-440e-9de0-1b3f5bc70ae8) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+The frontend will start on `http://localhost:5173` and will be ready to connect to the backend services.
