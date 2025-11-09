@@ -121,7 +121,3 @@ mvn spring-boot:run
 ```
 
 The service will start on `http://localhost:8080`.
-
------
-
-Ready for the FastAPI service README?
