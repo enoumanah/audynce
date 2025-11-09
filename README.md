@@ -182,17 +182,3 @@ VITE_API_BASE_URL="http://localhost:8080"
     *(The frontend will be running on `http://localhost:5173`)*
 
 Once all three services are running, you can open **`http://localhost:5173`** in your browser to use the application.
-
------
-
-## 📜 License
-
-This project is open-source. (You can add your preferred license, e.g., MIT, here).
-
-```
-MIT License
-
-Copyright (c) 2025 [Your Name Here]
-
-... (full license text) ...
-```
