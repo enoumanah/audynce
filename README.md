@@ -31,8 +31,6 @@ The application's logic is split into three distinct services that work in conce
       * **Filtering Generics:** Removing tracks with spammy names (e.g., "Instrumental," "Beat," `(2007)`) or from known "type beat" artists.
 7.  **Response:** The final, clean, and high-quality list of tracks is sent to the React frontend to be displayed. If the user requested it, this list is also used to create a new playlist on their Spotify account.
 
-[Image of a microservice architecture diagram]
-
 -----
 
 ## 💻 Tech Stack
